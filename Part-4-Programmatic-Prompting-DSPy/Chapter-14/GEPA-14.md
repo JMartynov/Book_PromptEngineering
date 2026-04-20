@@ -41,18 +41,23 @@ These examples demonstrate the concepts behind GEPA's reflective optimization an
 **Solution:** Use a Pydantic model to capture every step of the agent's reasoning.
 
 ```python
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import List, Optional, Any
 
-class Step(BaseModel):
-    thought: str
-    action: Optional[str]
-    observation: Optional[str]
+class TraceStep(BaseModel):
+    """Represents a single 'Thought-Action-Result' cycle."""
+    thought: str = Field(..., description="The model's internal reasoning")
+    action: Optional[str] = Field(None, description="The tool or function called")
+    observation: Optional[Any] = Field(None, description="The real-world data returned")
 
-class Trajectory(BaseModel):
-    steps: List[Step]
+class AgentTrajectory(BaseModel):
+    """The full 'Experience Log' of an agent's attempt at a goal."""
+    goal: str
+    steps: List[TraceStep]
     final_output: str
-    success: bool # The scalar reward (True/False)
+    is_success: bool
+
+# Example: GEPA uses this log to 'look back' at a failure.
 ```
 **Why this is preferred:** It provides the **Full Context** needed for reflective learning. Without the `steps`, the optimizer would be "guessing" where the error occurred.
 
@@ -63,15 +68,25 @@ class Trajectory(BaseModel):
 **Solution:** A "Meta-Prompt" that takes a failed trajectory and generates a diagnosis.
 
 ```python
-def generate_diagnosis(trajectory: Trajectory):
-    return f"""
-Analyze this failed agent trajectory.
-Determine the EXACT STEP where the logic went wrong.
-Why did it fail? Write a concise 'Optimization Rule' to prevent this.
+def generate_gepa_diagnosis(trajectory: AgentTrajectory) -> str:
+    """Uses a 'Teacher' model to diagnose a failed trajectory."""
 
-TRAJECTORY:
-{trajectory.steps}
-"""
+    meta_prompt = f"""
+    ### GOAL
+    {trajectory.goal}
+
+    ### FAILED TRAJECTORY
+    {trajectory.model_dump_json(indent=2)}
+
+    ### TASK
+    Analyze the trajectory above. Find the EXACT point where the model's logic failed.
+    Write a concise 'Optimization Rule' (e.g., "Always verify the tax ID before calculating total")
+    that would have prevented this specific failure.
+    """
+
+    # response = call_teacher_llm(meta_prompt)
+    # return response.rule
+    return "Rule: The agent must convert currency before summing prices."
 ```
 **Why this is preferred:** It turns raw data (failures) into **Actionable Insights** (Rules). These rules are then used to update the "System Instructions" of the agent.
 
@@ -82,14 +97,23 @@ TRAJECTORY:
 **Solution:** Use an LLM to "Merge" the new rule into the existing instructions.
 
 ```python
-def update_system_prompt(current_prompt, new_rule):
-    return f"""
-Here is a new lesson learned from a failure: "{new_rule}".
-Rewrite the original prompt below to include this lesson without making it redundant.
+def evolve_prompt(current_instructions: str, new_rule: str) -> str:
+    """Evolves the prompt by merging a reflective rule into the logic."""
 
-ORIGINAL PROMPT:
-{current_prompt}
-"""
+    evolution_prompt = f"""
+    ### CURRENT_INSTRUCTIONS
+    {current_instructions}
+
+    ### NEW_LESSON
+    {new_rule}
+
+    ### TASK
+    Rewrite the CURRENT_INSTRUCTIONS to incorporate the NEW_LESSON.
+    Maintain the tone and format. Do NOT simply append the rule; integrate it logically.
+    """
+
+    # return call_llm(evolution_prompt)
+    pass
 ```
 **Why this is preferred:** It automates the **Iteration Loop** of prompt engineering. Every failure becomes a permanent "Instruction" in the next version of the system.
 
@@ -100,14 +124,16 @@ ORIGINAL PROMPT:
 **Solution:** Keep track of the "Best of Both Worlds" candidates.
 
 ```python
-class PromptCandidate:
+class PromptCandidate(BaseModel):
+    id: str
     instructions: str
     accuracy: float
-    avg_tokens: int
+    token_usage: int
 
-# Pareto Frontier:
-# Candidate A: Acc 0.98, Tokens 2000 (The 'High-Quality' parent)
-# Candidate B: Acc 0.90, Tokens 200 (The 'Fast/Cheap' parent)
+# Example Frontier:
+# - Candidate A (The 'Gold'): 98% Acc | 2500 Tokens
+# - Candidate B (The 'Silver'): 95% Acc | 500 Tokens
+# GEPA evolves both 'Parents' simultaneously.
 ```
 **Why this is preferred:** It acknowledges that **"The Best Prompt"** depends on your business priorities. GEPA allows you to pick the specific "Trade-off" that fits your budget.
 
@@ -118,8 +144,18 @@ class PromptCandidate:
 **Solution:** Use an LLM to "Combine" two successful prompt candidates from the Pareto Frontier.
 
 ```python
-def breed_prompts(parent_a: str, parent_b: str):
-    # Meta-prompt: 'Combine the strengths of both parent prompts into a child prompt.'
+def breed_prompts(parent_a: PromptCandidate, parent_b: PromptCandidate) -> str:
+    """Uses LLM-synthesis to cross-pollinate instructions from two parents."""
+
+    breeding_prompt = f"""
+    Analyze these two successful prompt variations:
+    Parent A (Strength: {parent_a.accuracy} accuracy): {parent_a.instructions}
+    Parent B (Strength: {parent_b.token_usage} tokens): {parent_b.instructions}
+
+    TASK: Create a 'Child' prompt that combines the safety/logic of Parent A
+    with the brevity and formatting efficiency of Parent B.
+    """
+    # return call_llm(breeding_prompt)
     pass
 ```
 **Why this is preferred:** It allows for **Cumulative Learning**. Instead of starting from scratch, the system builds on the "Lessons" learned by previous generations.
@@ -131,15 +167,21 @@ def breed_prompts(parent_a: str, parent_b: str):
 **Solution:** Use GEPA-like reflection *during the request* to allow the AI to "Check its own work."
 
 ```python
-def agent_run(query):
-    # Try 1
-    result = execute(query)
-    # Reflect
-    diagnosis = call_llm(f"Check this result for errors: {result}")
-    if "ERROR" in diagnosis:
-        # Try 2 with diagnosis as feedback
-        result = execute(query, feedback=diagnosis)
-    return result
+def high_stakes_agent_run(user_goal: str):
+    """Executes a reflective loop during the live request for max accuracy."""
+
+    # Try 1: Generation
+    output = execute_task(user_goal)
+
+    # Step 2: Reflection (Reflective Diagnosis)
+    reflection = call_llm(f"Critically analyze this output for errors: {output}")
+
+    if "ERROR" in reflection.upper():
+        # Try 2: Corrective generation using the diagnosis as a 'hint'
+        print(f"Self-Correction triggered: {reflection}")
+        output = execute_task(user_goal, feedback=reflection)
+
+    return output
 ```
 **Why this is preferred:** It increases the **Accuracy Floor**. For tasks where failure is expensive, adding 1-2 reflection loops is the most effective way to ensure a correct answer.
 
@@ -150,8 +192,10 @@ def agent_run(query):
 **Solution:** Compare the "Sample Efficiency" of language feedback vs. scalar feedback.
 
 ```python
-# RL (GRPO): Needs 1000 examples to learn 'Do not reveal PII'.
-# GEPA: Needs 5 examples and 1 reflection to learn the same 'Rule'.
+# ROI Comparison (Conceptual)
+# RL Training: 1000 examples @ $0.05/ea = $50.00
+# GEPA Training: 20 examples @ $0.05/ea + 5 Reflections @ $0.10/ea = $1.50
+# GEPA is 33x cheaper and 10x faster to converge.
 ```
 **Why this is preferred:** GEPA is **35x more efficient**. This makes high-end prompt optimization possible for startups and niche enterprise tasks where data is scarce.
 
@@ -162,12 +206,18 @@ def agent_run(query):
 **Solution:** Ask the system to summarize the "Core Principles" it discovered.
 
 ```python
-def document_lessons(history_of_diagnoses: List[str]):
-    # LLM output:
-    # 'Top 3 Lessons for Billing Prompts:
-    # 1. Always verify the currency code.
-    # 2. Check for leap year errors in dates.
-    # 3. List tax ID separately.'
+def extraction_principles(diagnoses: List[str]) -> str:
+    """Distills the 'Collective Wisdom' of the optimizer into human-readable docs."""
+
+    doc_prompt = f"""
+    The following optimization rules were discovered by the system this week:
+    {diagnoses}
+
+    TASK: Summarize these into the 'Top 3 Engineering Principles' for our team.
+    Example: '1. Always validate JWT before processing payload.'
+    """
+    # return call_llm(doc_prompt)
+    pass
 ```
 **Why this is preferred:** It transfers knowledge from the **AI back to the Human Team**, improving the engineering culture and technical depth of the organization.
 

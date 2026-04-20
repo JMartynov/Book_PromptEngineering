@@ -46,17 +46,38 @@ These examples demonstrate how to use DSPy's optimizers (teleprompters) to autom
 **Solution:** Use the `BootstrapFewShot` optimizer to find the best examples.
 
 ```python
+import dspy
 from dspy.teleprompters import BootstrapFewShot
 
-def my_metric(example, prediction, trace=None):
-    # Returns True if the AI's category matches the ground truth
-    return example.category == prediction.category
+# 1. Define the task logic (Signature)
+class SupportTriage(dspy.Signature):
+    """Classify support requests into URGENT, NORMAL, or LOW."""
+    request_text = dspy.InputField()
+    priority = dspy.OutputField(desc="URGENT, NORMAL, or LOW")
 
-# 1. Define the optimizer
-optimizer = BootstrapFewShot(metric=my_metric, max_bootstrapped_demos=4)
+# 2. Define the Metric (Success Criteria)
+def triage_metric(example, prediction, trace=None):
+    """Simple exact-match metric for classification."""
+    return example.priority.upper() == prediction.priority.upper()
 
-# 2. 'Compile' the program using a small training set (e.g. 20 examples)
-# compiled_program = optimizer.compile(MyModule(), trainset=train_data)
+def compile_simple_optimizer(trainset: list):
+    """Demonstrates basic few-shot optimization."""
+
+    # 3. Initialize the Optimizer
+    # max_bootstrapped_demos: how many examples to 'teach' the model
+    optimizer = BootstrapFewShot(
+        metric=triage_metric,
+        max_bootstrapped_demos=4,
+        max_labeled_demos=4
+    )
+
+    # 4. Compile (The Search phase)
+    # student = dspy.Predict(SupportTriage)
+    # compiled_program = optimizer.compile(student, trainset=trainset)
+    # return compiled_program
+    pass
+
+# Note: In 2026, 'Compiling' a prompt is the equivalent of 'Training' a model.
 ```
 **Why this is preferred:** It automatically creates a "Few-Shot Prompt" that is **mathematically proven** to work well on your training data, replacing manual example selection.
 
@@ -67,11 +88,27 @@ optimizer = BootstrapFewShot(metric=my_metric, max_bootstrapped_demos=4)
 **Solution:** Use a more powerful model inside the metric function to "Grade" the optimizer's candidate prompts.
 
 ```python
+import dspy
+
 def judge_metric(example, prediction, trace=None):
-    # Call GPT-4o to grade the response from 0.0 to 1.0
-    # prompt = f"Rate this summary: {prediction.summary}..."
-    # score = call_judge(prompt)
-    return score > 0.8
+    """Uses a secondary LLM to grade the output of the optimizer's candidate."""
+
+    # The 'Judge' prompt defines the desired qualitative properties
+    judge_prompt = f"""
+    ### RUBRIC
+    - Score 1.0: Accurate, concise, and professional.
+    - Score 0.0: Wordy, incorrect, or rude.
+
+    REFERENCE: {example.summary}
+    PREDICTION: {prediction.summary}
+    """
+
+    # score_str = call_gpt4o(judge_prompt)
+    # return float(score_str) > 0.8
+    return True
+
+# MIPROv2 or COPRO can then use this 'Subjective' metric
+# to find prompts that 'feel' better to human users.
 ```
 **Why this is preferred:** It allows the optimizer to find prompts that improve **Qualitative** aspects like "Tone" and "Flow," which deterministic code cannot measure.
 
@@ -84,9 +121,23 @@ def judge_metric(example, prediction, trace=None):
 ```python
 from dspy.teleprompters import MIPROv2
 
-# MIPROv2 will search the space of both instruction text AND examples
-# optimizer = MIPROv2(metric=my_metric, num_candidates=10)
-# compiled_bot = optimizer.compile(MyModule(), trainset=train_data)
+def run_advanced_optimization(trainset: list):
+    """Uses Bayesian Optimization to find the best Instruction + Few-Shot combo."""
+
+    # MIPROv2 uses a 'Teacher' model to propose new instructions
+    # and a 'Student' model to evaluate them.
+    optimizer = MIPROv2(
+        metric=triage_metric,
+        num_candidates=10, # Number of instruction variations to try
+        init_temperature=1.0
+    )
+
+    # The 'Compile' step here is a heavy search over instructions AND examples
+    # compiled_bot = optimizer.compile(
+    #     dspy.Predict(SupportTriage),
+    #     trainset=trainset,
+    #     num_trials=30 # Total iterations of search
+    # )
 ```
 **Why this is preferred:** It is the most **advanced search strategy** available in 2026. It uses Bayesian Optimization to find the "Pareto Frontier" of performance vs. cost.
 
@@ -97,9 +148,12 @@ from dspy.teleprompters import MIPROv2
 **Solution:** Use an optimizer to "Propose" instructions based on a description of the task.
 
 ```python
-# The optimizer looks at the Signature and the Data and generates:
-# "You are a specialized legal assistant. Extract only the 'Force Majeure'..."
-# rather than your vague "Extract legal stuff" prompt.
+# Conceptual Workflow of Automatic Proposal:
+# 1. Signature: input(text) -> output(summary)
+# 2. Optimizer: Proposes "You are a Chief of Staff. Distill the following..."
+# 3. Optimizer: Proposes "You are a Technical Lead. Extract only the action items..."
+# 4. Search: Finds that "Chief of Staff" instruction yields 12% higher factual recall.
+# 5. Final Result: The "Chief of Staff" prompt is compiled into the program.
 ```
 **Why this is preferred:** it addresses the **"Blank Page"** problem. The system often generates instructions that use specific model-trigger words you wouldn't know.
 
@@ -111,9 +165,18 @@ from dspy.teleprompters import MIPROv2
 
 ```python
 def anti_disclaimer_metric(example, prediction, trace=None):
-    if "As an AI" in prediction.text:
-        return 0.0 # Critical failure
-    return 1.0 if prediction.correct else 0.0
+    """A metric that punishes 'Helpful Assistant' fluff."""
+
+    forbidden_phrases = ["as an ai", "i hope this helps", "certainly!"]
+
+    # 1. Check for negative constraints
+    if any(phrase in prediction.text.lower() for phrase in forbidden_phrases):
+        return 0.0 # Hard failure for the optimizer
+
+    # 2. Check for task accuracy
+    return 1.0 if prediction.is_correct else 0.0
+
+# The optimizer will now discard any prompt variations that lead to disclaimers.
 ```
 **Why this is preferred:** The optimizer will "learn" to avoid certain wordings (like "Be polite") that often trigger LLM disclaimers.
 
@@ -126,8 +189,14 @@ def anti_disclaimer_metric(example, prediction, trace=None):
 ```python
 from dspy.teleprompters import BootstrapFewShotWithRandomSearch
 
-# This tries 50 different prompt variations and picks the winner
-# optimizer = BootstrapFewShotWithRandomSearch(metric=my_metric, num_candidate_programs=50)
+# num_candidate_programs: The number of different 'Prompt Sets' to evaluate
+optimizer = BootstrapFewShotWithRandomSearch(
+    metric=triage_metric,
+    max_bootstrapped_demos=3,
+    num_candidate_programs=50 # Brute-force search for the win
+)
+
+# compiled_program = optimizer.compile(MyModule(), trainset=trainset)
 ```
 **Why this is preferred:** It prevents getting stuck in a **Local Maximum**. By exploring more of the search space, you find the "hidden gems" of prompt engineering.
 
@@ -138,11 +207,13 @@ from dspy.teleprompters import BootstrapFewShotWithRandomSearch
 **Solution:** Run the same optimizer twice—once for each model.
 
 ```python
-# Compilation 1: Target GPT-4o
-# gpt_prog = optimizer.compile(MyModule(), trainset=data, lm=gpt4)
+# Compilation 1: Target Llama-3 (Requires more detailed instructions)
+# with dspy.context(lm=llama3):
+#    llama_optimized = optimizer.compile(MyModule(), trainset=data)
 
-# Compilation 2: Target Llama-3
-# llama_prog = optimizer.compile(MyModule(), trainset=data, lm=llama3)
+# Compilation 2: Target GPT-4o (Requires more concise instructions)
+# with dspy.context(lm=gpt4o):
+#    gpt_optimized = optimizer.compile(MyModule(), trainset=data)
 ```
 **Why this is preferred:** It acknowledges that LLMs have **"Dialects."** A prompt that is "too wordy" for GPT-4 might be "just right" for a smaller model that needs more guidance.
 
@@ -153,9 +224,11 @@ from dspy.teleprompters import BootstrapFewShotWithRandomSearch
 **Solution:** Optimize the first module, then "Freeze" its prompt and optimize the second.
 
 ```python
-# 1. Optimize 'Retriever' module
-# 2. Use optimized 'Retriever' to get better context for 'Generator'
-# 3. Optimize 'Generator' module
+# Step 1: Optimize the 'Retriever' to find better facts.
+# Step 2: Use those facts to optimize the 'Synthesizer'.
+# Step 3: Use the synthesized output to optimize the 'Editor'.
+
+# In 2026, we call this 'End-to-End Programmatic Training'.
 ```
 **Why this is preferred:** It follows the **Layered Optimization** principle, ensuring that each part of the system is a stable foundation for the next.
 

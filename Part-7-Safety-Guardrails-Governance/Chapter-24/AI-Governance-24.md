@@ -46,18 +46,34 @@ These examples demonstrate how to build governance and compliance features into 
 **Solution:** Define a central Pydantic model for all AI audit logs.
 
 ```python
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import List, Optional
 
 class AIAuditLog(BaseModel):
-    request_id: str
-    timestamp: datetime
+    """The mandatory 'Flight Recorder' record for AI transactions."""
+    request_id: str = Field(..., description="Unique UUID for the trace")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
     user_id: str
-    logic_version: str # Hash of the prompt/config
+    logic_hash: str = Field(..., description="SHA-256 hash of the prompt and config used")
     input_text: str
     output_text: str
-    model_name: str
-    context_sources: list[str] # List of document IDs used
+    model_provider_id: str = Field(..., description="e.g., 'openai/gpt-4o-2024-05-13'")
+    context_source_ids: List[str] = Field(..., description="IDs of documents from the Vector DB")
+    governance_status: str = "PENDING_AUDIT"
+
+# Execution Example
+if __name__ == "__main__":
+    # log = AIAuditLog(
+    #     request_id="trace_7788",
+    #     user_id="user_123",
+    #     logic_hash="abc123def",
+    #     input_text="...",
+    #     output_text="...",
+    #     model_provider_id="gpt-4o",
+    #     context_source_ids=["doc_1"]
+    # )
+    pass
 ```
 **Why this is preferred:** It ensures **Data Consistency**. A centralized "Audit Sink" can then index these logs, allowing you to search for all decisions made by "Version 1.2" of the system.
 
@@ -68,12 +84,20 @@ class AIAuditLog(BaseModel):
 **Solution:** Use a router to apply different "Governance Policies" based on the user's location.
 
 ```python
-def route_with_governance(query, user_region):
-    if user_region == "EU":
-        # Apply high-risk EU AI Act constraints
-        return call_with_strict_evals(query)
+def route_with_compliance(query: str, user_metadata: dict):
+    """Applies regional governance rules to the AI pipeline."""
+
+    region = user_metadata.get("country_code", "US")
+
+    if region in ["EU", "FR", "DE"]:
+        # Tier 1: High-Risk (EU AI Act Compliance)
+        print("Applying EU AI Act Guardrails...")
+        # return call_with_bias_evals(query)
+        pass
     else:
-        return call_standard_llm(query)
+        # Tier 2: Standard Compliance
+        # return call_standard_llm(query)
+        pass
 ```
 **Why this is preferred:** It enables **Global Scalability**. You can comply with the world's strictest laws (EU) without slowing down your operations in less-regulated markets.
 
@@ -86,14 +110,22 @@ def route_with_governance(query, user_region):
 ```python
 import spacy
 
-nlp = spacy.load("en_core_web_sm")
+# Load a production-grade NER model
+# nlp = spacy.load("en_core_web_trf")
 
-def scrub_pii(text: str):
-    doc = nlp(text)
-    for ent in doc.ents:
-        if ent.label_ in ["PERSON", "EMAIL", "PHONE"]:
-            text = text.replace(ent.text, "[REDACTED]")
-    return text
+def anonymize_log_payload(text: str) -> str:
+    """Scrub PII from logs before they reach the data lake."""
+
+    # Mocking NER detection
+    # doc = nlp(text)
+    # for ent in doc.ents:
+    #     if ent.label_ in ["PERSON", "EMAIL", "PHONE"]:
+    #         text = text.replace(ent.text, f"<{ent.label_}>")
+
+    return text # Returns 'Hello <PERSON>' instead of 'Hello Bob'
+
+# Execution Example:
+# log_to_analytics(anonymize_log_payload(production_output))
 ```
 **Why this is preferred:** It implements **Privacy by Design**. By removing PII at the source, you reduce the surface area of your data liability.
 
@@ -104,10 +136,16 @@ def scrub_pii(text: str):
 **Solution:** Wrap your logic in a module that *requires* a "Justification" field in its structured output.
 
 ```python
+from pydantic import BaseModel, Field
+
 class RegulatedDecision(BaseModel):
-    decision: str
-    justification: str # Required for compliance
-    confidence_score: float
+    """Forces the LLM to provide the reasoning required by law."""
+    decision: Literal["APPROVED", "REJECTED", "ESCALATE"]
+    justification: str = Field(..., description="The specific policy reason for this choice")
+    evidence_citation: str = Field(..., description="Snippet from the context supporting this")
+    confidence_score: float = Field(..., ge=0.0, le=1.0)
+
+# The UI can now display: "Rejected because: [justification]"
 ```
 **Why this is preferred:** It forces **Decision Transparency**. The system physically cannot return a result without the "Reasoning" required by law.
 
@@ -118,9 +156,12 @@ class RegulatedDecision(BaseModel):
 **Solution:** Periodically run a "Parity Test" against your system's outputs.
 
 ```python
-def check_gender_bias(outputs: list):
-    # Logic: compare 'acceptance_rate' for male vs female names
-    # If the difference > 5%, trigger a Governance Alert.
+def check_for_demographic_parity(results_list: List[dict]):
+    """Analyzes output distribution for statistical bias."""
+
+    # Calculate success rate for Group A vs Group B
+    # if abs(rate_a - rate_b) > 0.05:
+    #     trigger_governance_alert("Significant Bias Detected in Version 1.2")
     pass
 ```
 **Why this is preferred:** It provides **Early Warning**. You catch the bias in your "Testing" or "Monitoring" phase rather than in a lawsuit.
@@ -132,9 +173,15 @@ def check_gender_bias(outputs: list):
 **Solution:** Use a "Content-Addressable" store for prompts (Git-like hashes).
 
 ```python
-def get_prompt_by_hash(p_hash: str):
-    # Fetch from an immutable 'Logic Ledger'
-    return ledger.get(p_hash)
+import hashlib
+
+def calculate_logic_hash(prompt_text: str, model_id: str, temp: float) -> str:
+    """Generates an immutable fingerprint for the AI's logic."""
+    payload = f"{prompt_text}|{model_id}|{temp}"
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+# logic_id = calculate_logic_hash("You are a judge...", "gpt-4", 0.0)
+# AIAuditLog(logic_version=logic_id, ...)
 ```
 **Why this is preferred:** It ensures **Non-Repudiation**. You can prove that "This specific text" was the one that generated "That specific response."
 
@@ -145,9 +192,17 @@ def get_prompt_by_hash(p_hash: str):
 **Solution:** Use a "Task Classifier" to intercept and block high-risk intents.
 
 ```python
-def governance_intercept(intent: str):
-    if intent in ["MEDICAL_ADVICE", "LEGAL_FILING"]:
-        return "ERROR: This system is not authorized for high-risk tasks."
+def intent_governance_gate(user_intent: str):
+    """Prevents the AI from performing unauthorized high-stakes tasks."""
+
+    restricted_keywords = ["medical advice", "prescribe", "legal filing", "wire transfer"]
+
+    if any(k in user_intent.lower() for k in restricted_keywords):
+        # 1. Log the attempt
+        # 2. Block the agent
+        return "ERROR: This AI system is not authorized for medical/legal actions."
+
+    return "AUTHORIZED"
 ```
 **Why this is preferred:** It acts as a **Safety Interlock**. It prevents the AI from wandering into domains where the company lacks the necessary certifications.
 
@@ -158,11 +213,20 @@ def governance_intercept(intent: str):
 **Solution:** Automatically generate a Markdown report based on your system's "Data Flow" metadata.
 
 ```python
-def generate_dpia_report(pipeline):
-    report = f"# Data Flow for {pipeline.name}\n"
-    for step in pipeline.steps:
-        report += f"- Step {step.id}: Sends {step.data_types} to {step.model}\n"
+def generate_compliance_doc(feature_metadata: dict) -> str:
+    """Automates the creation of legal compliance documentation."""
+
+    report = f"""
+    # AI Governance Report: {feature_metadata['name']}
+    - **Logic Version:** {feature_metadata['hash']}
+    - **Data Ingested:** {feature_metadata['data_types']}
+    - **Third-Party Providers:** {feature_metadata['providers']}
+    - **PII Scrubbing Status:** ACTIVE
+    - **Last Evaluation Score:** {feature_metadata['eval_score']}
+    """
     return report
+
+# Output: 'AI_Governance_v1.md'
 ```
 **Why this is preferred:** It automates **Legal Documentation**. It keeps your legal team happy without requiring engineers to manually write compliance reports every week.
 

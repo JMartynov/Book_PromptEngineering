@@ -41,15 +41,46 @@ These examples demonstrate how to build robust, multi-stage pipelines using mode
 **Solution:** Use a 2-step pipeline. Step 1 extracts "Atomic Facts," and Step 2 synthesizes those facts into a summary.
 
 ```python
-def extraction_node(text: str):
-    return f"Extract the top 5 most important facts from this text as a list:\n{text}"
+from typing import List, Dict
 
-def summary_node(facts: str):
-    return f"Based ONLY on the following facts, write a 2-sentence executive summary:\n{facts}"
+# Mock LLM call for demonstration
+def call_llm_api(prompt: str) -> str:
+    """Simulates a call to a language model."""
+    if "FACTS" in prompt:
+        return "1. Revenue grew 20%. 2. New office in Paris. 3. Costs cut by 5%."
+    return "strong growth and international expansion."
 
-# Pipeline Logic:
-# facts = call_llm(extraction_node(doc))
-# summary = call_llm(summary_node(facts))
+def execute_summary_pipeline(document_text: str) -> str:
+    """
+    Demonstrates a linear sequential pipeline.
+
+    What it solves: Prevents hallucination by grounding the final summary
+    in intermediate extracted facts.
+    """
+
+    # Node 1: Fact Extraction (Focus: Precision)
+    # By narrowing the task to 'bullets only', we maximize recall.
+    extract_prompt = f"### TASK: Extract top 5 facts as bullets:\n{document_text}"
+    atomic_facts = call_llm_api(extract_prompt)
+
+    # Node 2: Summary Generation (Focus: Narrative)
+    # The model no longer sees the noisy original text, only the clean facts.
+    summary_prompt = f"""
+    ### CONTEXT (FACTS ONLY):
+    {atomic_facts}
+
+    ### TASK:
+    Using only the facts above, write a 1-sentence executive summary.
+    """
+    final_summary = call_llm_api(summary_prompt)
+
+    return final_summary
+
+# Execution Example
+if __name__ == "__main__":
+    doc = "Long corporate document text here..."
+    # result = execute_summary_pipeline(doc)
+    # print(f"Sequential Result: {result}")
 ```
 **Why this is preferred:** It ensures the summary is **grounded in extracted facts**. By forcing the model to first "commit" to a list of facts, you prevent it from hallucinating external information during the summary phase.
 
@@ -60,15 +91,35 @@ def summary_node(facts: str):
 **Solution:** Use a "Router" LLM call to categorize the query and then route it to the appropriate specialized pipeline.
 
 ```python
-def router_node(query: str):
-    return f"Categorize this query as [BILLING], [TECH], or [GENERAL]. Query: {query}"
+from typing import Callable, Dict
 
-# Pipeline Logic:
-# category = call_llm(router_node(user_query))
-# if "BILLING" in category:
-#     result = run_billing_pipeline(user_query)
-# elif "TECH" in category:
-#     result = run_tech_pipeline(user_query)
+def billing_specialist(query: str) -> str:
+    return "Routing to billing secure server..."
+
+def tech_specialist(query: str) -> str:
+    return "Checking server logs for your ID..."
+
+def router_pipeline(user_query: str) -> str:
+    """
+    Routes queries to specialized modules based on intent classification.
+    """
+    # 1. Classification Node (Low cost)
+    # intent = call_cheap_model(f"Categorize as BILLING or TECH: {user_query}")
+    intent = "BILLING" # Mock result
+
+    # 2. Logic Dispatcher
+    expert_map: Dict[str, Callable[[str], str]] = {
+        "BILLING": billing_specialist,
+        "TECH": tech_specialist
+    }
+
+    handler = expert_map.get(intent, lambda q: "General response...")
+    return handler(user_query)
+
+# Execution Example
+if __name__ == "__main__":
+    # print(router_pipeline("Why was I charged twice?"))
+    pass
 ```
 **Why this is preferred:** It enables **Specialization**. Specialized prompts with specialized few-shot examples are always more accurate than a single "Generalist" prompt.
 
@@ -80,19 +131,31 @@ def router_node(query: str):
 
 ```python
 import asyncio
+from typing import List
 
-async def fetch_weather(city):
-    # (Mock tool call)
-    return f"Weather in {city}: 15°C"
+async def fetch_tool_data(tool_name: str, query: str) -> str:
+    """Simulates an asynchronous API/Tool call."""
+    await asyncio.sleep(0.5) # Simulate network latency
+    return f"[{tool_name} Result for {query}]"
 
-async def fetch_price(asset):
-    # (Mock tool call)
-    return f"{asset} Price: $2,400"
+async def parallel_query_pipeline(query: str) -> str:
+    """Executes independent sub-tasks in parallel to minimize latency."""
 
-async def parallel_pipeline(query):
-    # Triggering both tasks at the same time
-    results = await asyncio.gather(fetch_weather("London"), fetch_price("Gold"))
+    # In a real app, an LLM would first split the compound query into sub-tasks
+    tasks = [
+        fetch_tool_data("Weather", "London"),
+        fetch_tool_data("Finance", "Gold Price")
+    ]
+
+    # Run tasks concurrently
+    results = await asyncio.gather(*tasks)
+
     return " | ".join(results)
+
+# Execution Example
+if __name__ == "__main__":
+    # asyncio.run(parallel_query_pipeline("London weather and Gold price"))
+    pass
 ```
 **Why this is preferred:** It optimizes for **Latency**. In production, reducing response time from 4 seconds to 2 seconds is often more valuable than a slight increase in accuracy.
 
@@ -103,19 +166,31 @@ async def parallel_pipeline(query):
 **Solution:** Add a "Verification Node" that checks the output of the "Generation Node" and triggers a retry if the constraint is violated.
 
 ```python
-def generation_node(topic):
-    return f"Summarize {topic} in 20 words. Constraint: DO NOT use the word 'excellent'."
+def generation_node(topic: str) -> str:
+    return "This is an excellent summary of AI."
 
-def verification_node(output):
+def verification_node(output: str) -> str:
+    """Checks for violations of negative constraints."""
     if "excellent" in output.lower():
-        return f"REWRITE: You used the forbidden word 'excellent'. Rewrite this: {output}"
-    return "OK"
+        return "FAIL: You used the forbidden word 'excellent'."
+    return "PASS"
 
-# Pipeline Logic:
-# output = call_llm(generation_node("AI"))
-# feedback = call_llm(verification_node(output))
-# if "REWRITE" in feedback:
-#     output = call_llm(feedback) # Retry with feedback
+def polish_pipeline(topic: str):
+    """
+    Implements an automated quality assurance loop.
+    """
+    # 1. First Attempt
+    draft = generation_node(topic)
+
+    # 2. Automated QA
+    feedback = verification_node(draft)
+
+    if "FAIL" in feedback:
+        # 3. Corrective pass using feedback as a 'hint'
+        # draft = call_llm(f"Fix this: {draft}. Rule: {feedback}")
+        return "This is a great summary of AI." # Fixed
+
+    return draft
 ```
 **Why this is preferred:** It builds **Quality Assurance (QA)** into the system itself. This "Critic" pattern is the most effective way to enforce hard constraints that a single prompt might ignore.
 
@@ -126,17 +201,29 @@ def verification_node(output):
 **Solution:** Decompose the task into an "Outline" phase and a "Section Generation" phase.
 
 ```python
-def outline_node(topic):
-    return f"Create a 3-section outline for a README about: {topic}"
+from typing import List
 
-def section_node(section_name, outline):
-    return f"Write the detailed content for the section '{section_name}' using this outline: {outline}"
+def planner_node(topic: str) -> List[str]:
+    """Stage 1: Logic planning."""
+    # prompt = f"Create a 3-section outline for: {topic}"
+    return ["Introduction", "Architecture", "Security"]
 
-# Pipeline Logic:
-# sections = call_llm(outline_node("MyProject")).split("\n")
-# for s in sections:
-#     # Generate each section independently
-#     content = call_llm(section_node(s, outline))
+def executor_node(section: str, topic: str) -> str:
+    """Stage 2: Focused generation."""
+    # prompt = f"Write the content for '{section}' in the context of {topic}"
+    return f"Details about {section}..."
+
+def document_pipeline(topic: str) -> str:
+    # 1. Generate plan
+    sections = planner_node(topic)
+
+    # 2. Iterate through plan
+    full_doc = []
+    for s in sections:
+        content = executor_node(s, topic)
+        full_doc.append(f"## {s}\n{content}")
+
+    return "\n\n".join(full_doc)
 ```
 **Why this is preferred:** It avoids **Model Exhaustion**. LLMs have a "Reasoning Window" that degrades as they generate more text. By resetting the prompt for each section, you maintain high quality throughout the document.
 
@@ -147,13 +234,31 @@ def section_node(section_name, outline):
 **Solution:** Chain a "Database Lookup" (Python code) *before* the LLM reasoning step.
 
 ```python
-def db_lookup_pipeline(user_id, user_query):
-    # 1. Traditional Code (Deterministic)
-    user_record = db.find_one({"id": user_id})
+import json
 
-    # 2. AI Reasoning (Stochastic)
-    prompt = f"User Data: {user_record}. Answer query based on this: {user_query}"
-    return call_llm(prompt)
+class Database:
+    @staticmethod
+    def get_user_balance(uid: str) -> float:
+        return 150.50 # Mock data
+
+def balance_inquiry_pipeline(user_id: str, query: str) -> str:
+    """
+    Combines deterministic code with stochastic reasoning.
+    """
+    # 1. Traditional Code (Deterministic Truth)
+    balance = Database.get_user_balance(user_id)
+
+    # 2. AI Reasoning (Grounded Context)
+    prompt = f"""
+    ### USER_DATA:
+    Balance: ${balance}
+
+    ### TASK:
+    Answer the query based ONLY on the data above.
+    Query: {query}
+    """
+    # return call_llm(prompt)
+    pass
 ```
 **Why this is preferred:** It ensures **Grounding**. In AI System Engineering, we always prefer to fetch "Ground Truth" using deterministic code (SQL/APIs) rather than asking the LLM to remember it.
 
@@ -164,8 +269,13 @@ def db_lookup_pipeline(user_id, user_query):
 **Solution:** Separate the linguistic task from the structural task.
 
 ```python
-# Step 1: Translate the raw text (Linguistic Focus)
-# Step 2: Extract entities from the translated text into JSON (Structural Focus)
+# Step 1: Pure Linguistic Node
+# prompt = "Translate this to Spanish: 'Meet Bob in London'"
+translation = "Encuentro con Bob en Londres"
+
+# Step 2: Pure Structural Node
+# prompt = f"Extract entities from this text into JSON: {translation}"
+# Result: { "person": "Bob", "location": "Londres" }
 ```
 **Why this is preferred:** It follows the **Single Responsibility Principle**. By isolating the tasks, you reduce the "Cognitive Load" on the model, leading to 100% JSON validity and better translation quality.
 
@@ -176,12 +286,29 @@ def db_lookup_pipeline(user_id, user_query):
 **Solution:** Create a pipeline that "Pauses" after generating a draft and waits for a human "Approval" signal.
 
 ```python
-def draft_pipeline(details):
-    draft = call_llm(f"Draft a response to: {details}")
-    # In a real app, save to DB and send notification to Admin
-    print(f"DRAFT GENERATED: {draft}")
-    print("WAITING FOR HUMAN APPROVAL...")
-    # Pipeline proceeds only after 'is_approved' is set to True
+class PipelineState:
+    def __init__(self, draft: str):
+        self.draft = draft
+        self.is_approved = False
+
+def stage_1_generate_draft(user_input: str) -> PipelineState:
+    """AI works autonomously to create a proposal."""
+    # draft = call_llm(f"Draft email: {user_input}")
+    return PipelineState("Mock Email Body")
+
+def stage_2_finalize_action(state: PipelineState) -> str:
+    """Only proceeds if a human has verified the work."""
+    if not state.is_approved:
+        return "WAITING: Manual approval required."
+
+    # Send email logic...
+    return "SUCCESS: Action executed."
+
+# Execution Example:
+# state = stage_1_generate_draft("Refund request")
+# ... wait for human ...
+# state.is_approved = True
+# res = stage_2_finalize_action(state)
 ```
 **Why this is preferred:** It provides the **Governance** necessary for enterprise AI. Human-in-the-loop is not a failure of AI; it is a design pattern for high-stakes environments.
 

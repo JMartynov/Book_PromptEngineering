@@ -43,19 +43,39 @@ These examples demonstrate how to use orchestration frameworks to build real-wor
 ```python
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
 
+# 1. Initialize the components
 model = ChatOpenAI(model="gpt-4o-mini")
+parser = StrOutputParser()
 
-# Define two simple links in the chain
-chain = (
-    ChatPromptTemplate.from_template("Translate to French: {text}")
-    | model
-    | (lambda x: {"french_text": x.content}) # Intermediate transformation
-    | ChatPromptTemplate.from_template("Summarize this French text in 5 words: {french_text}")
-    | model
-)
+def build_translation_chain():
+    """
+    Demonstrates a declarative linear pipeline.
 
-# res = chain.invoke({"text": "The project is on track for a June release."})
+    Data Flow: Text -> Translate -> french_text -> Summarize -> Summary
+    """
+    # 2. Define independent logic blocks
+    translate_prompt = ChatPromptTemplate.from_template("Translate to French: {text}")
+    summarize_prompt = ChatPromptTemplate.from_template("Summarize in 5 words: {f_text}")
+
+    # 3. Assemble using the pipe operator
+    # 'RunnablePassthrough' or simple dicts handle state mapping
+    chain = (
+        translate_prompt
+        | model
+        | (lambda x: {"f_text": x.content}) # Intermediate mapping
+        | summarize_prompt
+        | model
+        | parser
+    )
+    return chain
+
+# Execution Example
+if __name__ == "__main__":
+    # pipe = build_translation_chain()
+    # result = pipe.invoke({"text": "AI engineering is evolving fast."})
+    pass
 ```
 **Why this is preferred:** It's **Declarative**. You can read the logic of the entire system in 10 lines of code. It's also "Lazy Evaluated," meaning you can easily add "Fallbacks" or "Logging" to any part of the pipe without changing the rest.
 
@@ -66,22 +86,33 @@ chain = (
 **Solution:** Use a "StateGraph" to allow for **Cycles** (loops). The agent can decide to re-run a node based on its own verification.
 
 ```python
+from typing import TypedDict, Dict
 from langgraph.graph import StateGraph, END
-from typing import TypedDict
 
+# 1. Define the shared state schema
 class AgentState(TypedDict):
     task: str
     result: str
     is_valid: bool
 
-def verify_node(state: AgentState):
-    # If the result is valid, go to END. Else, go back to 'solve'
-    return "end" if state["is_valid"] else "solve"
+def solver_node(state: AgentState) -> Dict:
+    """Node 1: Generates an initial answer."""
+    return {"result": "Proposed solution...", "is_valid": False}
 
-# Workflow setup
+def validator_node(state: AgentState) -> str:
+    """Conditional Edge: Decides where to go next."""
+    if state["is_valid"]:
+        return "end"
+    return "retry"
+
+# 2. Build the Graph
 workflow = StateGraph(AgentState)
-workflow.add_node("solve", lambda s: {"result": "...", "is_valid": False})
-workflow.add_conditional_edges("solve", verify_node, {"solve": "solve", "end": END})
+workflow.add_node("solve", solver_node)
+workflow.set_entry_point("solve")
+
+# 3. Define the Cycle
+workflow.add_conditional_edges("solve", validator_node, {"retry": "solve", "end": END})
+# app = workflow.compile()
 ```
 **Why this is preferred:** It mimics **Human Problem-Solving**. We don't just "think once and act." We try, see if it worked, and try again. This "Looped Reasoning" is the standard for high-reliability agents in 2026.
 
@@ -94,13 +125,23 @@ workflow.add_conditional_edges("solve", verify_node, {"solve": "solve", "end": E
 ```python
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
 
-# Load and Index automatically
-docs = SimpleDirectoryReader("./docs").load_data()
-index = VectorStoreIndex.from_documents(docs)
+def build_knowledge_engine(doc_path: str):
+    """
+    Orchestrates high-level RAG in three lines.
+    """
+    # 1. Ingest and Index automatically
+    documents = SimpleDirectoryReader(doc_path).load_data()
+    index = VectorStoreIndex.from_documents(documents)
 
-# The 'Query Engine' handles the prompt engineering for you
-query_engine = index.as_query_engine()
-# response = query_engine.query("What is our refund policy?")
+    # 2. Create the orchestration engine
+    query_engine = index.as_query_engine(similarity_top_k=3)
+    return query_engine
+
+# Execution Example
+if __name__ == "__main__":
+    # engine = build_knowledge_engine("./data")
+    # response = engine.query("What is our remote work policy?")
+    pass
 ```
 **Why this is preferred:** It is the **highest-level abstraction** for knowledge-based tasks. It allows you to focus on the "Data" rather than the "Plumbing" of semantic search.
 
@@ -111,18 +152,23 @@ query_engine = index.as_query_engine()
 **Solution:** Use PydanticAI to define an agent where the "Result Type" is a Pydantic model.
 
 ```python
-from pydantic_ai import Agent
 from pydantic import BaseModel
+from pydantic_ai import Agent
 
+# 1. Define the validated contract
 class OrderStatus(BaseModel):
-    id: int
+    order_id: int
     shipped: bool
+    tracking_url: str
 
-# Agent is now 'Typed'
+# 2. Define the Typed Agent
 agent = Agent('openai:gpt-4o', result_type=OrderStatus)
 
-# result = agent.run_sync("Check order 123")
-# print(result.data.id) # Autocomplete support!
+async def check_order(id: int):
+    # result.data is now a validated OrderStatus object!
+    # result = await agent.run(f"Status of {id}")
+    # print(result.data.shipped)
+    pass
 ```
 **Why this is preferred:** It provides the **Best Developer Experience**. You get full IDE support (types/completions) and the framework ensures the LLM's output is *physically validated* against your model before you ever see it.
 
@@ -135,15 +181,15 @@ agent = Agent('openai:gpt-4o', result_type=OrderStatus)
 ```python
 from langchain.agents import initialize_agent, Tool
 
-def search_web(q): return "..."
-def query_db(q): return "..."
+def web_search(q: str): return "Search results..."
+def db_query(q: str): return "Database row..."
 
 tools = [
-    Tool(name="Web", func=search_web, description="Search for current news"),
-    Tool(name="DB", func=query_db, description="Lookup user history")
+    Tool(name="Web", func=web_search, description="Use for current events"),
+    Tool(name="DB", func=db_query, description="Use for internal user data")
 ]
 
-# The agent automatically picks the tool based on the description
+# The agent autonomously selects the tool based on the description
 # agent = initialize_agent(tools, model, agent="zero-shot-react-description")
 ```
 **Why this is preferred:** It enables **Autonomous Decision Making**. The agent is no longer just "following a script"; it is "selecting tools" to achieve a goal.
@@ -158,10 +204,11 @@ tools = [
 primary = ChatOpenAI(model="gpt-4o")
 fallback = ChatOpenAI(model="gpt-4o-mini")
 
-# Chain with fallback
+# Creates a resilient 'Runnable'
 runnable = primary.with_fallbacks([fallback])
 
-# response = runnable.invoke("Process this massive file...")
+# If GPT-4o fails, the system instantly retries with GPT-4o-mini
+# response = runnable.invoke("Process this massive log...")
 ```
 **Why this is preferred:** It provides **Enterprise High-Availability**. Your application remains functional even if a specific AI model is experiencing a service outage.
 
@@ -175,9 +222,10 @@ runnable = primary.with_fallbacks([fallback])
 from langchain.globals import set_llm_cache
 from langchain_community.cache import InMemoryCache
 
+# Enable global caching
 set_llm_cache(InMemoryCache())
 
-# Second run of the same prompt takes 0ms and costs $0.
+# Second run of any identical prompt costs $0 and takes 0 seconds.
 ```
 **Why this is preferred:** It is a simple, **Set-and-Forget** way to reduce infrastructure costs for common user queries.
 
@@ -188,9 +236,10 @@ set_llm_cache(InMemoryCache())
 **Solution:** Use a graph structure to trigger multiple "Action" nodes in parallel and "Join" their results at a single node.
 
 ```python
-# In a graph, you can branch into:
-# Node A (Search), Node B (SQL), Node C (API)
-# and then merge into Node D (Aggregate).
+# Conceptual LangGraph Structure:
+# [START] -> [NODE_SEARCH_A, NODE_SEARCH_B, NODE_SEARCH_C] (triggered in parallel)
+# [ALL_SEARCHES] -> [NODE_SYNTHESIZE]
+# [NODE_SYNTHESIZE] -> [END]
 ```
 **Why this is preferred:** it drastically improves **Throughput**. For complex tasks that require multiple information sources, parallelization is the only way to maintain a "fast" user experience.
 

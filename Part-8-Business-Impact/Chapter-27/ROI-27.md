@@ -44,11 +44,21 @@ These examples demonstrate how to programmatically calculate and track the ROI o
 **Solution:** A Python function that takes benefits and costs as inputs.
 
 ```python
-def calculate_roi(benefit_usd, cost_usd):
-    if cost_usd == 0: return float('inf')
-    return ((benefit_usd - cost_usd) / cost_usd) * 100
+from typing import Union
 
-# Usage: $10,000 benefit vs $1,000 cost = 900% ROI
+def calculate_ai_roi(benefit_usd: float, cost_usd: float) -> Union[float, str]:
+    """Standardized formula for calculating AI feature profitability."""
+
+    if cost_usd == 0:
+        return "INF (Zero Cost)"
+
+    roi_percent = ((benefit_usd - cost_usd) / cost_usd) * 100
+    return round(roi_percent, 2)
+
+# Execution Example:
+# benefit = 10000.0 # $10k in saved labor
+# cost = 1000.0    # $1k in tokens + engineering
+# print(f"Project ROI: {calculate_ai_roi(benefit, cost)}%") # 900.0%
 ```
 **Why this is preferred:** It provides a **Standardized Metric** that can be compared across different teams and projects.
 
@@ -59,11 +69,19 @@ def calculate_roi(benefit_usd, cost_usd):
 **Solution:** Multiply the number of tasks by the "Time Saved" and the "Hourly Rate" of the human worker.
 
 ```python
-def estimate_labor_savings(num_tasks, mins_saved_per_task, hourly_rate=100):
-    total_hours = (num_tasks * mins_saved_per_task) / 60
-    return total_hours * hourly_rate
+def quantify_labor_savings(
+    annual_task_volume: int,
+    mins_saved_per_task: float,
+    hourly_rate_usd: float = 125.0
+) -> float:
+    """Calculates the annual gross financial benefit of an AI automation."""
 
-# 1,000 summaries * 5 mins saved = 83 hours saved = $8,300 benefit.
+    total_hours_saved = (annual_task_volume * mins_saved_per_task) / 60
+    annual_benefit = total_hours_saved * hourly_rate_usd
+
+    return round(annual_benefit, 2)
+
+# Example: 10,000 Support Tickets * 5 mins saved * $50/hr = $41,666 annual benefit.
 ```
 **Why this is preferred:** it translates "AI Metrics" (tasks completed) into **Business Metrics** (dollars saved).
 
@@ -74,10 +92,15 @@ def estimate_labor_savings(num_tasks, mins_saved_per_task, hourly_rate=100):
 **Solution:** Include "Engineering Time" in your cost attribution model.
 
 ```python
-def total_cost_of_ownership(token_cost, eng_hours, eng_rate=150):
-    return token_cost + (eng_hours * eng_rate)
+def calculate_tco(token_spend: float, eng_hours: float, eng_hourly_rate: float = 180.0) -> float:
+    """Calculates the true total cost of an AI project including human capital."""
 
-# Prompt Bill: $500 | Eng Time: 10 hrs = $2,000 TCO.
+    capital_expense = eng_hours * eng_hourly_rate
+    total_cost = token_spend + capital_expense
+
+    return round(total_cost, 2)
+
+# TCO = $500 (Tokens) + (40 hrs * $180) = $7,700.
 ```
 **Why this is preferred:** It provides an **Honest Accounting** of the system. Sometimes a "Free" open-source model is more expensive than a paid API because of the extra engineering hours needed to tune it.
 
@@ -88,12 +111,17 @@ def total_cost_of_ownership(token_cost, eng_hours, eng_rate=150):
 **Solution:** Calculate the ROI for both models based on their specific accuracy and cost.
 
 ```python
-def model_roi_comparison(results):
-    for model, data in results.items():
-        # Benefit = accuracy * max_value_of_task
-        benefit = data['accuracy'] * 100
-        roi = calculate_roi(benefit, data['cost'])
-        print(f"{model} ROI: {roi}%")
+def compare_model_roi(task_gross_value: float, model_stats: dict):
+    """Benchmarks models to find the point of maximum profit."""
+
+    for name, stats in model_stats.items():
+        # Benefit = accuracy * the maximum possible value of the task
+        benefit = stats['accuracy'] * task_gross_value
+        roi = calculate_ai_roi(benefit, stats['cost'])
+        print(f"Model: {name} | ROI: {roi}%")
+
+# If task_value is $1,000,000, GPT-4 is better.
+# If task_value is $1,000, Llama is better.
 ```
 **Why this is preferred:** It prevents **Over-Engineering**. If a 90% accurate model has a 500% ROI and a 95% accurate model has a 200% ROI, the business should choose the 90% model.
 
@@ -104,9 +132,18 @@ def model_roi_comparison(results):
 **Solution:** Include a "Penalty" for errors in your ROI calculation.
 
 ```python
-def net_roi_with_errors(benefit, cost, num_errors, cost_per_error):
-    total_error_cost = num_errors * cost_per_error
-    return calculate_roi(benefit - total_error_cost, cost)
+def calculate_net_roi(
+    gross_benefit: float,
+    total_cost: float,
+    error_count: int,
+    cost_per_error: float
+) -> float:
+    """Subtracts the financial liability of hallucinations from the ROI."""
+
+    total_error_liability = error_count * cost_per_error
+    net_benefit = gross_benefit - total_error_liability
+
+    return calculate_ai_roi(net_benefit, total_cost)
 ```
 **Why this is preferred:** It highlights the **True Cost of Hallucination**. It forces engineers to focus on "Safety and Reliability" as financial necessities.
 
@@ -117,9 +154,21 @@ def net_roi_with_errors(benefit, cost, num_errors, cost_per_error):
 **Solution:** Compare the "Engineering Cost" of optimization to the "Projected Token Savings."
 
 ```python
-def should_optimize(tokens_saved, num_calls_per_year, token_price, eng_cost):
-    annual_savings = (tokens_saved * num_calls_per_year) * token_price
-    return annual_savings > eng_cost # Return True if optimization pays off in 1 year
+def should_run_optimization(
+    tokens_saved: int,
+    annual_volume: int,
+    token_price_per_1k: float,
+    eng_cost_usd: float
+) -> bool:
+    """Determines if a prompt optimization project will pay for itself within 12 months."""
+
+    annual_savings = (tokens_saved / 1000) * annual_volume * token_price_per_1k
+
+    # ROI of the optimization task itself
+    return annual_savings > eng_cost_usd
+
+# Example: Save 100 tokens on 1M calls = $3,000 savings.
+# If eng_cost is $2,000, the project is APPROVED.
 ```
 **Why this is preferred:** It provides **Rational Decision Making** for the engineering team. It prevents "Micro-Optimization" of low-volume prompts.
 
@@ -130,11 +179,15 @@ def should_optimize(tokens_saved, num_calls_per_year, token_price, eng_cost):
 **Solution:** A script that aggregates production logs and calculates live ROI.
 
 ```python
-def get_live_roi():
-    usage = db.query("SELECT sum(tokens), count(*) FROM logs")
-    feedback = db.query("SELECT avg(rating) FROM feedback")
-    # Benefit = (total_tasks * time_saved) * rate * rating_multiplier
-    # ROI = ...
+def get_live_system_roi(db_conn):
+    """Aggregates production logs to calculate real-time profitability."""
+
+    # 1. Sum up token costs from logs
+    # 2. Count 'Success' flags from user feedback
+    # 3. Apply Labor Displacement multipliers
+
+    # return { "current_monthly_roi": 450.0, "trend": "up" }
+    pass
 ```
 **Why this is preferred:** it creates **Transparency and Trust**. When the AI system's value is visible on a dashboard, the team is less likely to face budget cuts.
 
@@ -145,9 +198,15 @@ def get_live_roi():
 **Solution:** Calculate the "Break-Even Point" where the benefit finally exceeds the initial development cost.
 
 ```python
-def break_even_point(initial_cost, monthly_benefit, monthly_token_cost):
-    net_monthly = monthly_benefit - monthly_token_cost
-    return initial_cost / net_monthly # Number of months to break even
+def calculate_breakeven_months(initial_investment: float, monthly_profit: float) -> float:
+    """Calculates the time-to-profitability for a new AI initiative."""
+
+    if monthly_profit <= 0:
+        return float('inf') # Will never be profitable
+
+    return round(initial_investment / monthly_profit, 1)
+
+# Example: $20,000 initial spend / $5,000 monthly profit = 4 months to break even.
 ```
 **Why this is preferred:** It manages **Executive Expectations**. It shows that while AI has high upfront costs, its "Marginal Cost" is very low, leading to massive long-term value.
 

@@ -43,15 +43,39 @@ These examples demonstrate the "Before and After" of moving from manual prompts 
 **Problem:** A hardcoded prompt that works on one model but fails on another because it's too specific to the first model's behavior.
 
 ```python
-# The "Old" Way: Brittle and hard to maintain
-def manual_triage(text):
+import json
+from typing import Dict, Any
+
+# MOCK LLM CALL
+def call_llm_raw(prompt: str) -> str:
+    """A typical raw completion call."""
+    return "The category is BUG." # Fail: not JSON!
+
+def manual_triage_system(user_text: str) -> Dict[str, Any]:
+    """The 'Old' way: Brittle, string-based, and hard to maintain."""
+
+    # Problem: Logic and Instructions are mixed
     prompt = f"""
     You are a professional support bot.
-    Analyze this: {text}
-    Return 'BUG' or 'FEATURE'.
-    Be very careful to use JSON! No extra text!
+    Analyze this text: {user_text}
+    Return 'BUG' or 'FEATURE' in JSON format like {{"category": "..."}}.
+    STRICT RULE: Do not include any extra text!
     """
-    # (Manual call to LLM, manual JSON parsing, manual error handling)
+
+    response = call_llm_raw(prompt)
+
+    try:
+        # Problem: Brittle parsing for unpredictable LLM output
+        return json.loads(response)
+    except json.JSONDecodeError:
+        # Problem: Manual fallback logic needed for model inconsistency
+        if "BUG" in response.upper(): return {"category": "BUG"}
+        return {"category": "UNKNOWN"}
+
+# Execution Example
+if __name__ == "__main__":
+    res = manual_triage_system("The login button is broken.")
+    # print(res)
 ```
 **Why this is a problem:** If you switch to a smaller model, it might ignore the "No extra text!" rule, causing your Python code to crash during parsing.
 
@@ -64,13 +88,27 @@ def manual_triage(text):
 ```python
 import dspy
 
+# 1. Define the reusable Logic Contract
 class Triage(dspy.Signature):
-    """Triage user feedback into BUG or FEATURE categories."""
-    feedback = dspy.InputField()
-    category = dspy.OutputField(desc="BUG, FEATURE")
+    """Triage user feedback into BUG or FEATURE categories for a software team."""
 
-# The 'Triage' logic is now separated from the wording.
-# DSPy handles the instructions for you based on the model.
+    feedback = dspy.InputField(desc="The raw text provided by the user")
+    category = dspy.OutputField(desc="Must be exactly 'BUG' or 'FEATURE'")
+
+# 2. Creating a predictor
+# This predictor can be compiled for ANY model (OpenAI, Anthropic, Ollama)
+triage_bot = dspy.Predict(Triage)
+
+def run_triage(text: str):
+    """The 'New' way: Programmatic, model-agnostic, and clean."""
+    # DSPy generates the best prompt for the current LM settings automatically
+    response = triage_bot(feedback=text)
+    return response.category
+
+# Execution Example
+if __name__ == "__main__":
+    # print(run_triage("I want a dark mode option.")) # 'FEATURE'
+    pass
 ```
 **Why this is preferred:** It is **Reusable**. This Signature can be compiled for a 7B model or a 175B model, and DSPy will generate the best instructions for each one automatically.
 
@@ -81,12 +119,27 @@ class Triage(dspy.Signature):
 **Solution:** Use DSPy Assertions to force a retry if the constraint is not met.
 
 ```python
+import dspy
+
 class ReliableTriage(dspy.Module):
+    """A self-correcting triage agent."""
+
+    def __init__(self):
+        super().__init__()
+        self.predictor = dspy.Predict(Triage)
+
     def forward(self, feedback):
-        pred = dspy.Predict(Triage)(feedback=feedback)
-        dspy.Assert(pred.category in ['BUG', 'FEATURE'],
-                    "Category must be exactly BUG or FEATURE")
+        pred = self.predictor(feedback=feedback)
+
+        # 1. Logic constraint: Physically enforce allowed labels
+        dspy.Assert(
+            pred.category in ['BUG', 'FEATURE'],
+            f"Invalid category '{pred.category}'. You MUST return exactly 'BUG' or 'FEATURE'."
+        )
+
         return pred
+
+# Note: In production, wrap this in a dspy.TypedPredictor or use with dspy.Retry
 ```
 **Why this is preferred:** Instead of your backend crashing, the system **self-corrects**. It sends the error message back to the LLM as a "Hint" to fix its own output.
 
@@ -97,14 +150,24 @@ class ReliableTriage(dspy.Module):
 **Solution:** In DSPy, you just change the config and run your evaluation suite.
 
 ```python
-# Test on expensive model
-with dspy.context(lm=dspy.OpenAI(model="gpt-4o")):
-    # gpt_score = evaluate(my_dspy_prog)
-    pass
+import dspy
 
-# Test on cheap model
-with dspy.context(lm=dspy.OllamaLocal(model="llama3")):
-    # llama_score = evaluate(my_dspy_prog)
+# 1. Load your evaluation dataset and metric
+# trainset = [...]
+# metric = accuracy_metric
+
+def benchmark_models(program):
+    """Calculates the ROI of switching models."""
+
+    # Test on Premium Model
+    # with dspy.context(lm=dspy.OpenAI(model="gpt-4o")):
+    #    premium_score = evaluate(program, devset=trainset)
+
+    # Test on Efficient Model
+    # with dspy.context(lm=dspy.OllamaLocal(model="llama3:8b")):
+    #    efficient_score = evaluate(program, devset=trainset)
+
+    # return premium_score, efficient_score
     pass
 ```
 **Why this is preferred:** It provides **Mathematical Confidence**. You can prove exactly how much "Quality" you lose (e.g. 2%) by saving 90% in costs.
@@ -118,11 +181,17 @@ with dspy.context(lm=dspy.OllamaLocal(model="llama3")):
 ```python
 from dspy.teleprompters import BootstrapFewShot
 
-# trainset = [Example(feedback="...", category="..."), ...]
-optimizer = BootstrapFewShot(metric=my_accuracy_metric)
+def compile_optimized_bot(student_module, train_data):
+    """Uses DSPy to 'Learn' the best few-shot prompt automatically."""
 
-# The optimizer 'learns' which examples are most helpful
-# compiled_bot = optimizer.compile(TriageBot(), trainset=trainset)
+    # Define success (e.g. LLM-as-a-Judge or Exact Match)
+    optimizer = BootstrapFewShot(metric=my_accuracy_metric, max_bootstrapped_demos=4)
+
+    # The 'Compile' step searches for the optimal prompt configuration
+    # compiled_program = optimizer.compile(student_module, trainset=train_data)
+
+    # return compiled_program
+    pass
 ```
 **Why this is preferred:** Research has shown that choosing "Random" examples can actually **hurt** model performance. DSPy ensures you only use the most statistically significant examples.
 
@@ -133,8 +202,12 @@ optimizer = BootstrapFewShot(metric=my_accuracy_metric)
 **Solution:** DSPy's optimizer checks the *entire* dataset after every change to ensure no regressions.
 
 ```python
-# The optimizer 'searches' for a prompt that satisfies ALL cases
-# in your training set, not just the one you're currently thinking about.
+# With DSPy, you don't 'tweak and pray'.
+# You define a metric and run:
+# optimizer.compile(my_program, trainset=my_golden_set)
+
+# If the new prompt version doesn't perform better on the WHOLE set,
+# the compiler won't use it.
 ```
 **Why this is preferred:** It provides **Regression Protection**. You can iterate on your AI features with the same confidence as you do with unit-tested code.
 
@@ -145,8 +218,8 @@ optimizer = BootstrapFewShot(metric=my_accuracy_metric)
 **Solution:** Use a "Prompt Optimizer" that tries to find the shortest set of instructions that still maintains high accuracy.
 
 ```python
-# Some DSPy optimizers can be tuned to penalize long prompts,
-# helping you find the "Cheapest-but-Accurate" version of your system.
+# Advanced DSPy optimizers (like MIPROv2) can explore the
+# Pareto Frontier between 'Prompt Length' and 'Accuracy'.
 ```
 **Why this is preferred:** In production, saving 100 tokens per call can save thousands of dollars at scale.
 
@@ -157,8 +230,12 @@ optimizer = BootstrapFewShot(metric=my_accuracy_metric)
 **Solution:** DSPy code is self-documenting. A Signature clearly defines the inputs and outputs.
 
 ```python
-# Any developer can read the 'Triage' class and
-# instantly understand the system's purpose.
+# Any developer can look at this and know EXACTLY what the AI does:
+class DocumentAuditor(dspy.Signature):
+    """Scan a legal document for compliance with GDPR Section 4."""
+    document_text = dspy.InputField()
+    compliance_score = dspy.OutputField()
+    violations = dspy.OutputField(desc="List of non-compliant clauses")
 ```
 **Why this is preferred:** It reduces the **"Bus Factor"** (the risk of only one person knowing how the "Magic Prompt" works) and improves overall team speed.
 

@@ -41,10 +41,25 @@ These examples demonstrate how to measure and implement features that drive busi
 **Solution:** Implement a tracking function that correlates token cost with a "Success Metric" (e.g. user conversion).
 
 ```python
-def log_business_roi(trace_id, tokens, cost, converted):
-    # Metric: Cost per conversion
-    roi = converted / cost if cost > 0 else 0
-    # Log to dashboard: feature_roi.save(trace_id, roi)
+import time
+from typing import Dict, Any
+
+def log_transaction_roi(trace_id: str, tokens: int, cost_usd: float, was_successful: bool):
+    """Correlates infrastructure cost with business success."""
+
+    # Logic: Business value of a successful conversion is $50.00
+    conversion_value = 50.0 if was_successful else 0.0
+
+    profit_margin = conversion_value - cost_usd
+    roi_percentage = (profit_margin / cost_usd) * 100 if cost_usd > 0 else 0
+
+    # Save to financial dashboard
+    print(f"[{trace_id}] ROI: {roi_percentage:.2f}% | Profit: ${profit_margin:.4f}")
+
+# Execution Example
+if __name__ == "__main__":
+    # log_transaction_roi("tr_99", 500, 0.015, True)
+    pass
 ```
 **Why this is preferred:** It provides **Financial Visibility**. It allows management to see exactly which prompts are "profitable" and which are just a "token drain."
 
@@ -55,11 +70,21 @@ def log_business_roi(trace_id, tokens, cost, converted):
 **Solution:** Use your Golden Dataset to run an accuracy benchmark across models and calculate the "Cost of Error."
 
 ```python
-results = {
-    "gpt-4o": {"acc": 0.98, "cost": 0.05},
-    "gpt-4o-mini": {"acc": 0.92, "cost": 0.005}
-}
-# Business Logic: Is the 6% accuracy gain worth 10x the price?
+def analyze_model_economics(task_value: float, failure_cost: float, results: dict):
+    """Calculates the true business profit of different model choices."""
+
+    for model, data in results.items():
+        # Profit = (Accuracy * TaskValue) - (ErrorRate * FailureCost) - InferenceCost
+        expected_value = (data['acc'] * task_value)
+        expected_penalty = ((1 - data['acc']) * failure_cost)
+        net_profit = expected_value - expected_penalty - data['cost']
+
+        print(f"Model: {model} | Net Profit per 1k runs: ${net_profit * 1000:.2f}")
+
+# Example Data:
+# premium = {'acc': 0.99, 'cost': 0.03}
+# efficient = {'acc': 0.95, 'cost': 0.001}
+# If failure_cost is $100, the Premium model is ALWAYS more profitable.
 ```
 **Why this is preferred:** It enables **Data-Driven Procurement**. You can justify the use of expensive models only when the "Cost of a Hallucination" is higher than the price difference.
 
@@ -70,11 +95,19 @@ results = {
 **Solution:** Use a script to strip out adjectives and polite phrases and test the accuracy delta.
 
 ```python
-def prune_and_test(full_prompt):
-    minimal_prompt = remove_fluff(full_prompt)
-    acc = run_eval(minimal_prompt)
-    if acc >= baseline:
-        return minimal_prompt # Save 500 tokens per call!
+def prune_and_verify(full_prompt: str, test_dataset: list) -> str:
+    """Recursively minifies the prompt while maintaining a quality threshold."""
+
+    baseline_score = run_eval(full_prompt, test_dataset)
+    minified_prompt = full_prompt
+
+    # 1. Remove 'Politeness' and 'Fluff' tokens
+    # 2. Re-run eval
+    # 3. If score >= (baseline_score - 0.01), commit the change
+
+    return "Optimized Minified Prompt"
+
+# Savings: 200 tokens/call * 1M calls = $2,000 saved monthly.
 ```
 **Why this is preferred:** It directly **Increases Throughput**. Shorter prompts result in faster responses for users and lower bills for the business.
 
@@ -85,16 +118,17 @@ def prune_and_test(full_prompt):
 **Solution:** Use a Pydantic validator to enforce the rule deterministically before the result is delivered.
 
 ```python
-from pydantic import field_validator
+from pydantic import BaseModel, field_validator
 
-class LoanResult(BaseModel):
+class LoanApproval(BaseModel):
     is_approved: bool
     user_age: int
 
     @field_validator('is_approved')
-    def age_gate(cls, v, values):
-        if values.get('user_age') < 18 and v == True:
-            return False # Business Hard-Stop
+    def enforce_legal_age(cls, v: bool, info: Any):
+        # Deterministic Business Rule
+        if v == True and info.data.get('user_age') < 18:
+            return False # Forcibly override the AI
         return v
 ```
 **Why this is preferred:** It provides **Liability Protection**. It ensures that the AI cannot accidentally violate core business rules or laws, even if it "hallucinates."
@@ -106,9 +140,14 @@ class LoanResult(BaseModel):
 **Solution:** Use a Signature-based system (like DSPy) to reuse the logic.
 
 ```python
-# The 'Signatures' are business assets.
-# They define 'What' the business does.
-# They can be re-compiled for ANY new model.
+# The 'Signature' is the core Intellectual Property of the company.
+# It defines WHAT the business does, not HOW to talk to a specific model.
+class InternalAuditor(dspy.Signature):
+    """Identify expense reports that violate section 4 of the T&E policy."""
+    report_text = dspy.InputField()
+    violation_found = dspy.OutputField()
+
+# re_compile(InternalAuditor, target_model="claude-3")
 ```
 **Why this is preferred:** It prevents **Vendor Lock-in**. Your intellectual property (the business logic) is decoupled from the specific AI provider.
 
@@ -119,14 +158,14 @@ class LoanResult(BaseModel):
 **Solution:** Batch all 5 tasks into a single structured output call.
 
 ```python
-class UnifiedAnalysis(BaseModel):
+class UnifiedMessageAnalysis(BaseModel):
     sentiment: str
-    language: str
-    entities: list
-    summary: str
-    intent: str
+    detected_language: str
+    entities: List[str]
+    one_sentence_summary: str
+    routing_intent: str
 
-# 1 call instead of 5 = 80% reduction in base latency/overhead.
+# 1 call instead of 5 = 80% reduction in API base costs and total latency.
 ```
 **Why this is preferred:** It maximizes **Token Density**. You only pay the "Prompt Overhead" once, significantly reducing the cost-per-insight.
 
@@ -137,10 +176,14 @@ class UnifiedAnalysis(BaseModel):
 **Solution:** Use a "Judge LLM" to automate 90% of the QA process.
 
 ```python
-def auto_qa(interactions):
-    for i in interactions:
-        # Ask GPT-4o-mini to grade the 'Worker' model
-        # Result: 'Pass' or 'Escalate to Human'
+def automated_qa_check(interaction: dict):
+    """Uses a secondary model to audit the performance of the production AI."""
+
+    # grade = call_judge_llm(InteractionAuditorSignature, interaction)
+
+    # if grade.score < 0.7:
+    #     escalate_to_human_reviewer(interaction, reason=grade.justification)
+    pass
 ```
 **Why this is preferred:** It provides **QA at Scale**. You can monitor 100% of your AI's outputs for quality, rather than just a 1% random sample.
 
@@ -151,10 +194,13 @@ def auto_qa(interactions):
 **Solution:** Capture those corrections as "Golden Examples" to automatically update the prompt.
 
 ```python
-def feedback_loop(user_correction):
-    # Save correction to training set
-    # Trigger a DSPy re-compilation
-    print("System learned from user error.")
+def process_user_edit(original_ai_output: str, user_final_version: str):
+    """Captures the 'Delta' between AI and Human as a new training example."""
+
+    # 1. Store as a 'Correction' test case in the Golden Dataset
+    # 2. Trigger an automated 'Improvement' run in the dev environment
+
+    print("Optimization dataset updated with real-world human preference.")
 ```
 **Why this is preferred:** It creates a **Self-Optimizing Product**. The system gets better the more it is used, creating a "Competitive Moat" of specialized data.
 

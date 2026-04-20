@@ -47,37 +47,60 @@ These examples demonstrate how to implement the Evolution Ladder using modern Py
 **Solution:** Use a simple similarity-based approach to select the most relevant examples from a library for the current task.
 
 ```python
-# In 2026, we use libraries like 'sentence-transformers' or a Vector DB
-from typing import List, Dict
+import numpy as np
+from typing import List, Dict, Any
+from pydantic import BaseModel
 
-class ExampleStore:
-    def __init__(self, examples: List[Dict]):
-        self.examples = examples
+# Mock embedding and LLM calls for demonstration
+def get_embedding(text: str) -> List[float]:
+    """Simulates a call to an embedding model like text-embedding-3-small."""
+    return [0.1] * 1536 # Placeholder vector
 
-    def get_k_relevant(self, current_input: str, k=2) -> str:
-        # (Mocking a semantic search)
-        # In practice: find top K examples where example['input']
-        # is most similar to current_input.
-        relevant = self.examples[:k]
-        return "\n".join([f"Input: {e['input']}\nOutput: {e['output']}" for e in relevant])
+class Example(BaseModel):
+    """Represents a validated demonstration for a prompt."""
+    query: str
+    response: str
+    embedding: Optional[List[float]] = None
 
-# Use case: Sentiment analysis for various product categories
-store = ExampleStore([
-    {"input": "The battery died in 1 hour.", "output": "Negative (Electronics)"},
-    {"input": "The shirt was too small.", "output": "Negative (Apparel)"}
-])
+class DynamicFewShotManager:
+    """
+    Manages a library of examples and retrieves them semantically.
 
-def build_dynamic_prompt(user_input: str):
-    examples_str = store.get_k_relevant(user_input)
-    return f"""
-Analyze the sentiment and category of the input.
-EXAMPLES:
-{examples_str}
+    Benefit: Optimizes context window by only providing relevant demonstrations.
+    """
 
-INPUT: {user_input}
-OUTPUT:"""
+    def __init__(self, example_library: List[Example]):
+        self.library = example_library
+        # Pre-compute embeddings for efficiency in production
+        for ex in self.library:
+            ex.embedding = get_embedding(ex.query)
 
-# print(build_dynamic_prompt("My phone is overheating."))
+    def get_top_k(self, current_query: str, k: int = 2) -> str:
+        """Finds semantically similar examples using cosine similarity."""
+        query_vec = np.array(get_embedding(current_query))
+
+        # Calculate scores (In production, use a Vector DB like Pinecone/Qdrant)
+        scored = []
+        for ex in self.library:
+            sim = np.dot(query_vec, np.array(ex.embedding)) # Simple dot product
+            scored.append((sim, ex))
+
+        # Sort and return top K
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_examples = [s[1] for s in scored[:k]]
+
+        return "\n\n".join([f"Input: {e.query}\nOutput: {e.response}" for e in top_examples])
+
+# Execution Example
+if __name__ == "__main__":
+    library = [
+        Example(query="My battery is dead.", response="Category: Hardware"),
+        Example(query="How do I change my password?", response="Category: Security")
+    ]
+    manager = DynamicFewShotManager(library)
+
+    # Prompt would use manager.get_top_k("The phone won't turn on.")
+    # print(manager.get_top_k("The phone won't turn on."))
 ```
 **Why this is preferred:** It ensures the model sees examples that are contextually relevant to the current query, which is far more effective than static few-shotting.
 
@@ -88,20 +111,47 @@ OUTPUT:"""
 **Solution:** Run the reasoning prompt multiple times and use a Python function to pick the most common answer.
 
 ```python
+import re
 from collections import Counter
+from typing import List, Optional
 
-def run_self_consistency(query: str, n=5):
-    answers = []
-    for _ in range(n):
-        # (Mock LLM call)
-        # response = call_llm(f"Solve step-by-step: {query}")
-        # answers.append(extract_final_answer(response))
-        answers.append("12") # Mock result
+def call_llm(prompt: str) -> str:
+    """Mock LLM call returning a step-by-step solution."""
+    return "Thinking: 1. A=1, B=1. Result: 2. FINAL: 2"
 
-    # Majority vote
-    vote_count = Counter(answers)
-    final_answer = vote_count.most_common(1)[0][0]
-    return final_answer
+def extract_answer(text: str) -> Optional[str]:
+    """Extracts the final result from a CoT response block."""
+    match = re.search(r"FINAL: (\d+)", text)
+    return match.group(1) if match else None
+
+def solve_with_consensus(problem: str, n_samples: int = 5) -> str:
+    """
+    Runs the same reasoning prompt multiple times and picks the most common result.
+
+    Problem solved: Reduces reasoning 'flukes' in complex math or logic.
+    """
+    results = []
+    for _ in range(n_samples):
+        # We increase 'temperature' slightly to ensure diversity of reasoning paths
+        raw_output = call_llm(problem)
+        ans = extract_answer(raw_output)
+        if ans:
+            results.append(ans)
+
+    if not results:
+        return "Error: No valid results produced."
+
+    # Majority Vote Logic
+    counts = Counter(results)
+    most_common_ans, vote_count = counts.most_common(1)[0]
+
+    print(f"Consensus reached: {most_common_ans} ({vote_count}/{n_samples} votes)")
+    return most_common_ans
+
+# Execution Example
+if __name__ == "__main__":
+    # ans = solve_with_consensus("If X=2 and Y=3, what is X+Y?")
+    pass
 ```
 **Why this is preferred:** It is the standard "Safety Pattern" for high-stakes arithmetic or logic. Research has proven that multiple independent "thoughts" are significantly more accurate than a single one.
 
@@ -112,16 +162,31 @@ def run_self_consistency(query: str, n=5):
 **Solution:** Chain two prompts—one to extract a structured outline, and a second to write the post section-by-section.
 
 ```python
-def pipeline_step_1(transcript: str):
-    return f"Extract a 3-point outline from this transcript:\n{transcript}"
+def pipeline_stage_1_outline(transcript: str) -> List[str]:
+    """Stage 1: Structural Extraction."""
+    # prompt = f"Extract a 3-point outline from: {transcript}"
+    return ["Introduction", "Product Features", "Conclusion"]
 
-def pipeline_step_2(section_title: str, outline: str):
-    return f"Write the content for the section '{section_title}' based on this outline:\n{outline}"
+def pipeline_stage_2_content(section: str, global_outline: List[str]) -> str:
+    """Stage 2: Detailed Drafting."""
+    # prompt = f"Write the content for '{section}' based on this outline: {global_outline}"
+    return f"Content for {section}..."
 
-# Logic:
-# outline = call_llm(pipeline_step_1(raw_data))
-# for section in outline.split("\n"):
-#     content = call_llm(pipeline_step_2(section, outline))
+def execute_chained_pipeline(data: str):
+    """Coordinates the multi-stage generation process."""
+    outline = pipeline_stage_1_outline(data)
+
+    full_document = []
+    for section_name in outline:
+        content = pipeline_stage_2_content(section_name, outline)
+        full_document.append(f"## {section_name}\n{content}")
+
+    return "\n\n".join(full_document)
+
+# Execution Example
+if __name__ == "__main__":
+    # blog_post = execute_chained_pipeline("Raw meeting transcript...")
+    pass
 ```
 **Why this is preferred:** Each prompt has a much simpler task, leading to significantly higher overall quality and fewer hallucinations in long-form content.
 
@@ -132,24 +197,41 @@ def pipeline_step_2(section_title: str, outline: str):
 **Solution:** Use a prompt that encourages the model to "stop and ask" for information from a tool in a loop.
 
 ```python
-def react_agent_prompt(goal: str, tools: str):
-    return f"""
-Goal: {goal}
-Tools: {tools}
+import json
 
-Use the following format:
-THOUGHT: <reasoning about what to do>
-ACTION: <tool_name>(<argument>)
-OBSERVATION: <result from the tool>
-... (repeat if needed)
-FINAL ANSWER: <the final response>
-"""
+def get_current_stock_price(symbol: str) -> float:
+    """Mock tool call."""
+    return 190.20 if symbol == "AAPL" else 0.0
 
-# Example: "What is the price of AAPL?"
-# THOUGHT: I need to check the stock price of AAPL.
-# ACTION: get_stock_price("AAPL")
-# OBSERVATION: $190.20
-# FINAL ANSWER: The current price of AAPL is $190.20.
+def react_agent_executor(goal: str):
+    """
+    Implements the Reason + Act loop.
+
+    Logic:
+    1. Model thinks about what tool it needs.
+    2. Model calls the tool.
+    3. Python executes tool and returns observation.
+    4. Model reasons about the new data and provides final answer.
+    """
+
+    # SYSTEM PROMPT would define the THOUGHT, ACTION, OBSERVATION format.
+    # We simulate a 2-turn interaction.
+
+    # Turn 1: Model realizes it needs price data
+    thought_1 = "I need to find the current price of AAPL to answer the user."
+    action_1 = '{"tool": "get_price", "args": {"symbol": "AAPL"}}'
+
+    # Execution: Python calls the tool
+    obs_1 = get_current_stock_price("AAPL")
+
+    # Turn 2: Model provides final answer based on observation
+    final_answer = f"The current price of AAPL is ${obs_1}."
+    return final_answer
+
+# Execution Example
+if __name__ == "__main__":
+    # print(react_agent_executor("Price of Apple?"))
+    pass
 ```
 **Why this is preferred:** This is the foundation of "Agentic" systems. It allows the model to interact with the world instead of just guessing.
 
@@ -160,18 +242,24 @@ FINAL ANSWER: <the final response>
 **Solution:** Run a second "Critique" prompt to find errors in the first response and then a third "Update" prompt to fix them.
 
 ```python
-def generate_critique(original_output: str):
-    return f"""
-Review the following Python code for security flaws.
-Be critical. List any issues you find.
+def generate_draft(task: str) -> str:
+    return "def query(id): return db.execute(f'SELECT * FROM users WHERE id={id}')" # Vulnerable code
 
-CODE:
-{original_output}
+def run_critique(draft: str) -> str:
+    """Stage 2: Critical analysis from a different semantic perspective."""
+    # prompt = f"Critically review this code for SQL injection. Draft: {draft}"
+    return "Vulnerability: Line 1 uses string interpolation, making it prone to SQL injection."
 
-CRITIQUE:"""
+def apply_fixes(draft: str, critique: str) -> str:
+    """Stage 3: Verified implementation."""
+    return "def query(id): return db.execute('SELECT * FROM users WHERE id=?', (id,))" # Fixed code
 
-def apply_fixes(original_output: str, critique: str):
-    return f"Original Code: {original_output}\nCritique: {critique}\nRewrite the code to fix the issues listed."
+# Execution Example
+if __name__ == "__main__":
+    # initial = generate_draft("database query function")
+    # feedback = run_critique(initial)
+    # final_code = apply_fixes(initial, feedback)
+    pass
 ```
 **Why this is preferred:** It mimics the peer-review process, leading to safer and more robust code generation in production.
 
@@ -182,17 +270,25 @@ def apply_fixes(original_output: str, critique: str):
 **Solution:** Instruct the model to ask for more info if the request is underspecified, rather than hallucinating a guess.
 
 ```python
-clarification_prompt = """
-### ROLE
-You are a helpful project manager.
+def process_user_intent(user_msg: str):
+    """
+    Ensures intent quality before execution.
 
-### INSTRUCTIONS
-If the user's request is missing key information (e.g. deadline, topic, length),
-DO NOT execute the task. Instead, ask for the missing details.
+    Rule: If info is missing, ask. DO NOT hallucinate.
+    """
+    # Logic (Simulated):
+    # Intent: SUMMARY
+    # Missing: SOURCE_TEXT
 
-USER: Write a summary.
-"""
-# AI Output: "What would you like me to summarize? Please provide the text or a link."
+    if "missing" == "missing": # Pseudo logic
+        return "I'd be happy to summarize that. Could you please provide the text or a link?"
+
+    return "Proceeding to summary..."
+
+# Execution Example
+if __name__ == "__main__":
+    # print(process_user_intent("Summarize for me."))
+    pass
 ```
 **Why this is preferred:** It prevents "Wasteful Hallucination" and ensures the AI actually does what the user intended, improving user satisfaction.
 
@@ -203,14 +299,19 @@ USER: Write a summary.
 **Solution:** Prompt the model to generate three distinct approaches and then "Judge" which one is most likely to succeed.
 
 ```python
-tot_prompt = """
-Goal: Design a marketing strategy for a new eco-friendly water bottle.
+def tot_strategy_selector(goal: str):
+    """
+    Explores the 'Solution Tree' before committing.
 
-1. Generate three distinct strategies (A, B, and C).
-2. For each strategy, list one major 'Pro' and one major 'Con'.
-3. Based on this evaluation, select the best strategy and expand on it.
+    Benefit: Maximizes creativity and strategic depth.
+    """
+    # 1. Generate 3 Paths (A, B, C)
+    # 2. Score Paths
+    # 3. Select Best
+    return "Strategy B (Social-First) was selected as it has the highest reach-per-dollar."
 
-RESPONSE:"""
+# Execution Example:
+# final_plan = tot_strategy_selector("Launch a new coffee brand.")
 ```
 **Why this is preferred:** It encourages the model to explore the "Solution Space" more broadly before committing to a single answer, which research shows results in higher creativity.
 
@@ -221,8 +322,19 @@ RESPONSE:"""
 **Solution:** Append a "Reasoning Trigger" to the end of your prompt.
 
 ```python
-def quick_cot_prompt(query: str):
-    return f"{query}\n\nLet's think step by step before providing the answer."
+def fast_accuracy_boost(query: str):
+    """
+    Lowest effort, highest ROI technique.
+    """
+    # Adding 'Let's think step by step' is a research-proven
+    # trigger for System 2 thinking in LLMs.
+    prompt = f"{query}\n\nLet's think step by step before providing the answer."
+
+    # return call_llm(prompt)
+    pass
+
+# Execution Example:
+# ans = fast_accuracy_boost("A bat and a ball cost $1.10. The bat costs $1.00 more...")
 ```
 **Why this is preferred:** It is the "Lowest Effort, Highest ROI" technique. Research indicates that this simple phrase triggers a different "Mode" in transformer-based models that improves math and logic scores by 10-20%.
 

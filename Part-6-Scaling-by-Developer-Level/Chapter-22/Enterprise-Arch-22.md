@@ -44,12 +44,22 @@ These examples demonstrate how to implement the different layers of an enterpris
 **Solution:** Implement a router in the "Model Layer" that selects the provider based on the task complexity.
 
 ```python
-class ModelRouter:
-    def get_model(self, task_complexity: str):
-        if task_complexity == "low":
-            return "ollama/llama3-8b"
-        elif task_complexity == "high":
-            return "openai/gpt-4o"
+from typing import Literal, Dict, Any
+
+class InfrastructureRouter:
+    """Infrastructure Layer: Manages model providers and routing."""
+
+    def get_model_endpoint(self, complexity: Literal["low", "high"]) -> Dict[str, str]:
+        """Routes to the most ROI-effective provider for the task."""
+
+        if complexity == "low":
+            # Direct to on-prem lightweight model (Zero marginal cost)
+            return {"provider": "vllm", "model": "llama-3-8b-instruct"}
+
+        # Direct to premium cloud model for complex reasoning
+        return {"provider": "openai", "model": "gpt-4o"}
+
+# The Logic Layer calls this without knowing which cloud is being used.
 ```
 **Why this is preferred:** It optimizes for **Cost and Latency**. You don't "waste" expensive GPT-4 tokens on simple tasks like grammar correction.
 
@@ -60,10 +70,20 @@ class ModelRouter:
 **Solution:** Inject user credentials into your RAG retrieval logic.
 
 ```python
-def get_secure_context(query, user_token):
-    # 1. Verify user role from token
-    # 2. Add 'role_filter' to Vector DB search
-    return vector_db.search(query, filter={"allowed_groups": user_token.group})
+from pydantic import BaseModel
+
+class UserToken(BaseModel):
+    user_id: str
+    roles: list[str]
+
+def fetch_gated_context(query: str, token: UserToken) -> str:
+    """Data Layer: Fetches context restricted by user permissions."""
+
+    # 1. Enforce RBAC (Role-Based Access Control) at the query level
+    filters = {"allowed_roles": {"$in": token.roles}}
+
+    # results = vector_db.search(query, filter=filters)
+    return "Filtered context data..."
 ```
 **Why this is preferred:** It ensures **Context Isolation**. The AI model only ever sees data that the user is legally allowed to view.
 
@@ -76,14 +96,15 @@ def get_secure_context(query, user_token):
 ```python
 import dspy
 
-# Defined in Logic Layer
-class SupportSignature(dspy.Signature):
-    """Answer support queries with empathy and accuracy."""
+class CustomerSupportLogic(dspy.Signature):
+    """Business requirement: Answer support tickets using company docs."""
     context = dspy.InputField()
     query = dspy.InputField()
     answer = dspy.OutputField()
 
-# logic = dspy.ChainOfThought(SupportSignature)
+# The 'Compiled' version of this is model-specific.
+# logic_v1 = "customer_support_gpt4_optimized.json"
+# logic_v2 = "customer_support_llama3_optimized.json"
 ```
 **Why this is preferred:** It provides **Logic Portability**. The business logic (SupportSignature) is stable, while the "Implementation" is re-compiled for each model.
 
@@ -94,11 +115,16 @@ class SupportSignature(dspy.Signature):
 **Solution:** Implement a centralized guardrail service in the "Governance Layer."
 
 ```python
-def global_safety_check(response_text):
-    # This runs for EVERY AI app in the company
-    if contains_prohibited_content(response_text):
-        return "ERROR: Safety violation detected."
-    return response_text
+def enterprise_governance_service(ai_output: str) -> str:
+    """Governance Layer: Enforces global compliance across all apps."""
+
+    # 1. Mandatory PII Scrubbing
+    # 2. Toxicity Check
+    # 3. Instruction Adherence Audit
+
+    if is_unsafe(ai_output):
+        return "ERROR: Response blocked by Global Security Policy."
+    return ai_output
 ```
 **Why this is preferred:** It provides **Compliance at Scale**. You don't have to trust every individual developer to "do the right thing"; the platform enforces it.
 
@@ -109,11 +135,17 @@ def global_safety_check(response_text):
 **Solution:** Use a shared Trace ID that follows the request through all 4 layers.
 
 ```python
-def process_request(user_input):
-    trace_id = generate_uuid()
-    # Layer 4 (Gateway) logs trace_id
-    # Layer 3 (Logic) logs trace_id
-    # Layer 2 (Data) logs trace_id
+import uuid
+
+def process_tiered_request(user_input: str):
+    """Governance Layer entry point."""
+    trace_id = str(uuid.uuid4())
+
+    # Logic Layer: logs(trace_id, logic_version_hash)
+    # Data Layer: logs(trace_id, retrieved_doc_ids)
+    # Model Layer: logs(trace_id, tokens_used, model_id)
+
+    pass
 ```
 **Why this is preferred:** It enables **Forensic Debugging**. You can see that a failure was caused by "Layer 2 returning an empty context" rather than "Layer 3 failing to reason."
 
@@ -124,10 +156,17 @@ def process_request(user_input):
 **Solution:** Maintain a registry of versioned "Logic Hashes" in your Logic Layer.
 
 ```python
-# logic_registry.yaml
-legal_bot:
-  v1.0: "hash_abc123" # Previous stable version
-  v1.1: "hash_def456" # Current buggy version
+# Registry in Logic Layer
+def get_logic_artifact(task_name: str, environment: str = "production") -> str:
+    """Retrieves the specific compiled prompt hash for the task."""
+
+    registry = {
+        "pricing_bot": {
+            "production": "hash_v1_stable_abc",
+            "canary": "hash_v2_experimental_def"
+        }
+    }
+    return registry.get(task_name, {}).get(environment)
 ```
 **Why this is preferred:** It provides **Operational Resilience**. You can roll back the "Intelligence" of your app in seconds without a full code redeploy.
 
@@ -138,10 +177,13 @@ legal_bot:
 **Solution:** The "Data Layer" provides different "Chunk Sizes" based on the target model.
 
 ```python
-def get_chunks_for_model(doc, model_name):
-    if "gpt-4o" in model_name:
-        return chunk(doc, size=4000) # Big chunks
-    return chunk(doc, size=500) # Small chunks for smaller models
+def get_optimized_context(doc_id: str, target_model: str):
+    """Data Layer: Tailors context size to model hardware."""
+
+    if "gpt-4o" in target_model:
+        return fetch_full_chapter(doc_id) # Maximize reasoning context
+
+    return fetch_top_3_snippets(doc_id) # Stay within small model peak
 ```
 **Why this is preferred:** It maximizes **Model-Context Alignment**. Each model gets the amount of information it can most effectively process.
 
@@ -152,9 +194,13 @@ def get_chunks_for_model(doc, model_name):
 **Solution:** The "Governance Layer" aggregates token usage from the "Model Layer" and maps it to "Logic Layer" features.
 
 ```python
-# Report:
-# Feature: 'Legal Draft' | Cost: $400 | User Rating: 4.8/5
-# Feature: 'ChatBot' | Cost: $2000 | User Rating: 2.1/5
+# ROI Analytics (Conceptual Result)
+# | App Name     | Dept | Cost  | Satisfaction | Revenue Delta |
+# |--------------|------|-------|--------------|---------------|
+# | LegalDraft   | Legal| $500  | 4.9/5        | +$10,000      |
+# | GenericChat  | HR   | $5000 | 2.1/5        | $0            |
+
+# Decision: Retire GenericChat, double down on LegalDraft.
 ```
 **Why this is preferred:** It enables **Strategic Resource Allocation**. It becomes clear which AI projects are providing value and which are just "burning tokens."
 
