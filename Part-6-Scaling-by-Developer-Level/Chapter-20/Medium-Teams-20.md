@@ -44,14 +44,21 @@ These examples demonstrate how to build a collaborative, production-ready AI sys
 **Solution:** Use a TypedDict to define a global "State" that all nodes in the graph can read and write to.
 
 ```python
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, List, Dict
 from langgraph.graph.message import add_messages
 
 class TeamState(TypedDict):
-    # 'add_messages' ensures history is appended, not overwritten
-    messages: Annotated[list, add_messages]
+    """A strictly defined schema for team collaboration on an AI workflow."""
+
+    # 'add_messages' ensures LLM history is combined correctly from all nodes
+    messages: Annotated[List[Dict], add_messages]
+
+    # Domain-specific shared memory
     research_notes: str
     is_ready_for_review: bool
+    audit_log: List[str]
+
+# Every node function on the team receives this exact object structure.
 ```
 **Why this is preferred:** It provides a **Single Source of Truth**. Any developer adding a new "Node" to the system knows exactly what data is available and how to update it.
 
@@ -62,13 +69,17 @@ class TeamState(TypedDict):
 **Solution:** Break the agent's logic into small, independent "Node Functions" that can be tested in isolation.
 
 ```python
-def research_node(state: TeamState):
-    # Developer A focuses only on the research logic
-    return {"research_notes": "Found 5 competitors..."}
+def research_node(state: TeamState) -> Dict:
+    """Developer A focuses only on the research logic."""
+    # ... complex scraping/retrieval logic ...
+    return {"research_notes": "Identified 5 key competitors.", "audit_log": ["Research completed"]}
 
-def review_node(state: TeamState):
-    # Developer B focuses only on the quality check logic
-    return {"is_ready_for_review": True}
+def review_node(state: TeamState) -> Dict:
+    """Developer B focuses only on the quality check logic."""
+    # ... logic to check research_notes for accuracy ...
+    return {"is_ready_for_review": True, "audit_log": ["Review passed"]}
+
+# These nodes are combined in a separate 'app.py' graph definition.
 ```
 **Why this is preferred:** It enables **Parallel Development**. Two engineers can work on different parts of the same agent without stepping on each other's toes.
 
@@ -79,12 +90,24 @@ def review_node(state: TeamState):
 **Solution:** Use "Metadata Filters" in your production Vector DB to restrict the search space.
 
 ```python
-def filtered_search(query, project_id):
-    # This filter happens in the DB engine, not the LLM
-    return vector_db.search(
-        query,
-        filter={"project_id": project_id, "status": "published"}
-    )
+from typing import List
+
+class ProductionRetriever:
+    def fetch(self, query: str, project_id: str) -> List[str]:
+        """Ensures strict data isolation at the retrieval layer."""
+
+        # This filter is executed by the DB engine for 100% security
+        # results = vector_db.search(
+        #     query,
+        #     filter={"project_id": project_id, "status": "approved"}
+        # )
+        return ["Authorized Document 1", "Authorized Document 2"]
+
+# Execution Example
+if __name__ == "__main__":
+    pass
+    # retriever = ProductionRetriever()
+    # context = retriever.fetch("Who is the CEO?", project_id="client_99")
 ```
 **Why this is preferred:** It ensures **Data Isolation** between different projects or users, which is a hard requirement for B2B applications.
 
@@ -95,10 +118,19 @@ def filtered_search(query, project_id):
 **Solution:** Run a script in your CI/CD pipeline that checks the LLM's output against a "Golden Dataset."
 
 ```python
-def test_billing_regression():
-    # Load 50 'Golden' examples
-    # Run new prompt version
-    # Assert similarity > 0.95
+import pytest
+
+def test_billing_extractor_regression():
+    """CI test to ensure prompt changes don't break downstream logic."""
+
+    # 1. Load 50 'Golden' examples of billing transcripts
+    # dataset = load_golden_set("billing_v1")
+
+    # 2. Run the current 'billing_node' logic
+    # results = run_node_on_dataset(billing_node, dataset)
+
+    # 3. Assert quality is within 5% of the baseline
+    # assert calculate_accuracy(results) > 0.92
     pass
 ```
 **Why this is preferred:** It moves from **"Vibes-based deployment"** to **"Metrics-based deployment."** It gives the team the confidence to iterate fast.
@@ -110,11 +142,18 @@ def test_billing_regression():
 **Solution:** Use a decorator or a context manager to send every step to a tracing platform (e.g. Langfuse).
 
 ```python
-# In 2026, we use standard OpenTelemetry wrappers
-@trace_span(name="AgentRun")
-def run_agent(task):
-    # All LLM calls inside this function are automatically correlated
+# In 2026, we use the standard OpenTelemetry (OTel) instrumentation
+# @observe(name="Production_Agent_Run")
+def run_agent_workflow(user_query: str, project_id: str):
+    """Executes the agent while automatically logging every step for the team."""
+
+    # tracer.set_tag("project_id", project_id)
+    # 1. Plan
+    # 2. Research
+    # 3. Review
     pass
+
+# The team can now 'Replay' the exact trace in a playground to debug.
 ```
 **Why this is preferred:** It provides **Forensic Visibility**. You can "Replay" the exact sequence of events that led to a failure, even if it happened 3 days ago.
 
@@ -125,11 +164,18 @@ def run_agent(task):
 **Solution:** Implement a "Fallback" mechanism in your orchestration layer.
 
 ```python
-def call_llm_with_fallback(prompt):
+def call_llm_with_resilience(prompt: str):
+    """Ensures feature availability through automated failover."""
+
     try:
-        return gpt4.invoke(prompt)
-    except RateLimitError:
-        return claude3.invoke(prompt) # The 'Warm Standby'
+        # Primary: High-performance model
+        return gpt4o.invoke(prompt)
+    except Exception as e:
+        print(f"Primary model failed: {e}. Switching to fallback...")
+        # Secondary: Independent provider/model
+        return claude3.invoke(prompt)
+
+# Result: 99.9% availability for AI features.
 ```
 **Why this is preferred:** It ensures **High Availability**. Your application remains functional even when your primary AI provider is struggling.
 
@@ -154,10 +200,18 @@ text: "You are a support bot..."
 **Solution:** Build a "Review Node" into your graph that pauses the state and sends a notification to a Slack channel or internal UI.
 
 ```python
-def human_review_node(state: TeamState):
-    if not state.get("human_approved"):
-        return "wait_for_human"
-    return "finalize"
+def human_gate_node(state: TeamState) -> str:
+    """A graph boundary that waits for human intervention."""
+
+    # 1. Check if an 'approved' flag exists in the persisted state
+    if state.get("is_approved_by_human"):
+        return "finalize_workflow"
+
+    # 2. If not, trigger a notification and HALT
+    # send_slack_notification("Draft ready for review: http://internal-tool/123")
+    return "wait_for_signal"
+
+# The workflow only moves to 'finalize' once a human updates the state.
 ```
 **Why this is preferred:** It builds **Trust and Governance**. It allows the team to deploy AI for sensitive tasks while maintaining human accountability.
 

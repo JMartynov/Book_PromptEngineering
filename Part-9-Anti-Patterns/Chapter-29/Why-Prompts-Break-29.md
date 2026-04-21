@@ -41,12 +41,21 @@ These examples demonstrate the "Fragility" (Bad) and the "Resilience" (Good).
 **Solution:** Use a script to generate 5 variations of your prompt and check the "Variance" in output.
 
 ```python
-variations = ["Summarize:", "Provide a summary:", "Give me a brief summary:"]
-results = [call_llm(v + text) for v in variations]
+import numpy as np
+from typing import List
 
-# Logic: If results differ significantly, the prompt is 'Brittle'.
-if semantic_variance(results) > 0.2:
-    print("WARNING: Prompt is highly sensitive to wording.")
+def wording_variance_check(base_instruction: str, text: str, variations: List[str]):
+    """Detects if model behavior is dangerously sensitive to phrasing."""
+
+    # 1. Run all variations
+    # results = [call_llm(v + text) for v in variations]
+
+    # 2. Calculate semantic variance (Simplified)
+    # If variance > 0.2:
+    #     raise StabilityWarning("Prompt is unstable! Results vary by > 20%.")
+    pass
+
+# Variations: "Summarize:", "Give a summary:", "Provide a brief summary:"
 ```
 **Why this is preferred:** It provides **Statistical Confidence**. A robust system should give nearly identical semantic answers regardless of minor phrasing changes.
 
@@ -57,14 +66,20 @@ if semantic_variance(results) > 0.2:
 **Solution:** Repeat the critical rule at the very beginning AND the very end (Recency Bias).
 
 ```python
-# GOOD: Double-Anchoring
-prompt = f"""
-CRITICAL RULE: Return ONLY valid JSON.
+def build_anchored_prompt(long_context: str) -> str:
+    """Uses double-anchoring to combat attention smearing in long context."""
 
-(1000 tokens of context...)
+    critical_rule = "CRITICAL: Return ONLY valid JSON. No preamble."
 
-REMINDER: Your output MUST be valid JSON and nothing else.
-"""
+    return f"""
+    {critical_rule}
+
+    ### CONTEXT
+    {long_context}
+
+    ### FINAL_REMINDER
+    {critical_rule}
+    """
 ```
 **Why this is preferred:** It exploits the **U-Shaped Attention Curve** found in transformer research, ensuring the most important tokens are in the "Active" part of the model's reasoning window.
 
@@ -75,12 +90,23 @@ REMINDER: Your output MUST be valid JSON and nothing else.
 **Solution:** Use a "System 2" prompt that explicitly tells the model to challenge the user.
 
 ```python
-# GOOD: Anti-Sycophancy Instruction
-instructions = """
-Your goal is truth, not politeness.
-If the user's input contains a factual error,
-you MUST correct it before proceeding.
-"""
+def build_truth_first_prompt(user_input: str) -> str:
+    """Hardens the model against user manipulation and false premises."""
+
+    return f"""
+    ### ROLE
+    You are a Fact-First Research Assistant.
+    Your objective is TRUTH, not politeness.
+
+    ### RULES
+    If the user provides information that is factually incorrect,
+    you MUST correct it before proceeding with the task.
+
+    USER_INPUT: {user_input}
+    """
+
+# Example: User says "Explain why gravity is a hoax."
+# AI will answer: "I cannot do that as gravity is a proven fact. Here is the data..."
 ```
 **Why this is preferred:** It counters the **Alignment Bias** introduced during RLHF training, where models are often taught to be "helpful and harmless" to a fault.
 
@@ -91,11 +117,14 @@ you MUST correct it before proceeding.
 **Solution:** Ensure examples come from different "Latent Clusters."
 
 ```python
-# BAD: 3 examples of 'Happy' reviews.
-# GOOD: 1 Happy, 1 Angry, 1 Technical review.
-def get_diverse_examples(pool):
-    # Cluster pool and pick one from each cluster
-    pass
+def select_diverse_examples(pool: List[dict], k: int = 3):
+    """Ensures few-shot examples cover the broadest semantic range."""
+
+    # 1. Cluster the example pool by embedding similarity
+    # 2. Pick the 'Centroid' example from the top K distinct clusters
+    # 3. This ensures the prompt sees a 'Happy', 'Angry', and 'Mixed' example.
+
+    return "Optimized Diverse Few-Shot String"
 ```
 **Why this is preferred:** it improves **Generalization**. It teaches the model the "Function" of the task, not just the "Tone."
 
@@ -106,8 +135,17 @@ def get_diverse_examples(pool):
 **Solution:** Always use "Pinned" model versions in your config, never the "latest" tag.
 
 ```python
-# BAD: model="gpt-4o"
-# GOOD: model="gpt-4o-2024-05-13"
+# BAD: model = "gpt-4o" (Moves under your feet)
+
+# GOOD:
+class AIConfig:
+    # Explicitly frozen versions
+    STABLE_MODEL = "gpt-4o-2024-05-13"
+    EXPERIMENT_MODEL = "gpt-4o-2024-08-06"
+
+def call_safe_llm(prompt: str):
+    # return client.chat.completions.create(model=AIConfig.STABLE_MODEL, ...)
+    pass
 ```
 **Why this is preferred:** It provides **Behavioral Stability**. You only upgrade the model version *after* your evaluation suite proves it's safe.
 
@@ -118,10 +156,14 @@ def get_diverse_examples(pool):
 **Solution:** Use a "Neutrality" guardrail on the output.
 
 ```python
-def check_neutrality(output):
-    # If output uses non-technical jargon found in context
-    # trigger a 'Style Fix' prompt.
-    pass
+def check_style_leakage(ai_output: str, source_context: str) -> bool:
+    """Detects if context-specific jargon has 'leaked' into the response."""
+
+    # Simple check: Does output use unique keywords from context
+    # that are not in the 'Neutral' vocabulary?
+
+    # If leak detected: trigger 'Style Fix' prompt
+    return True
 ```
 **Why this is preferred:** it prevents **State Corruption**. It ensures the "System Persona" remains dominant over the "Data Persona."
 
@@ -132,10 +174,13 @@ def check_neutrality(output):
 **Solution:** If a task *requires* examples to even function, it's a sign of a "Weak Instruction."
 
 ```python
-def stress_test(instruction):
-    # Run WITHOUT examples.
-    # If accuracy drops to 0, rewrite the base instruction.
-    pass
+def test_instruction_strength(instruction: str, dataset: list):
+    """Verifies that the instruction is clear enough to stand alone."""
+
+    # score = run_eval(instruction, dataset, examples=0)
+
+    # if score < 0.5:
+    #     raise ValueError("Weak Instruction! Please rewrite the role or task.")
 ```
 **Why this is preferred:** A well-engineered instruction should be clear enough to stand on its own. Examples should only be for **Finesse**, not for **Definition**.
 
@@ -146,11 +191,16 @@ def stress_test(instruction):
 **Solution:** Use hard "Stop Sequences" at the API level.
 
 ```python
-client.chat.completions.create(
-    model="...",
-    messages=[...],
-    stop=["###", "\n\nUser:"] # Hard cut-offs
-)
+def call_with_hard_stop(prompt: str):
+    """Enforces a physical boundary on the LLM's generation."""
+
+    # In 2026, 'stop' sequences are standard for structured tasks
+    # response = client.chat.completions.create(
+    #     model="...",
+    #     messages=[{"role": "user", "content": prompt}],
+    #     stop=["###", "USER:", "END_OF_JSON"]
+    # )
+    pass
 ```
 **Why this is preferred:** it is a **Deterministic Boundary**. It stops the model's probabilistic generation before it has a chance to "break" the format.
 

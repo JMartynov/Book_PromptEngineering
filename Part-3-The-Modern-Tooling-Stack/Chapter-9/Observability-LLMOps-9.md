@@ -45,18 +45,44 @@ These examples demonstrate how to build observability and monitoring into your P
 
 ```python
 import uuid
+import time
+import logging
+from typing import Any, Dict
 
-class LLMTrace:
-    def __init__(self, trace_id=None):
-        self.trace_id = trace_id or str(uuid.uuid4())
+# Setup centralized logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("AI_Audit")
 
-    def log_span(self, name, start_time, end_time, input_data, output_data):
-        # In a real app, send this to an OTel collector
-        print(f"[{self.trace_id}] {name}: {end_time - start_time:.2f}s")
+class TraceSpan:
+    """
+    Encapsulates a single 'hop' in an agentic workflow.
+    """
+    def __init__(self, trace_id: str, name: str):
+        self.trace_id = trace_id
+        self.name = name
+        self.start_time = time.perf_counter()
 
-# Usage:
-# t = LLMTrace()
-# t.log_span("Retrieval", start, end, query, context)
+    def end(self, input_data: Any, output_data: Any):
+        duration = time.perf_counter() - self.start_time
+        # In production, send this structured JSON to a sink (e.g. Langfuse/OTel)
+        logger.info({
+            "trace_id": self.trace_id,
+            "span_name": self.name,
+            "duration_sec": duration,
+            "input_preview": str(input_data)[:50],
+            "output_preview": str(output_data)[:50]
+        })
+
+# Execution Example
+def run_monitored_step(request_id: str, data: str):
+    span = TraceSpan(request_id, "Data_Cleaning_Node")
+    # ... logic ...
+    span.end(data, "cleaned_data")
+
+if __name__ == "__main__":
+    # Generate one ID for the whole user session
+    uid = str(uuid.uuid4())
+    run_monitored_step(uid, "raw context...")
 ```
 **Why this is preferred:** It provides **Granular Visibility**. You can see the exact duration of each "hop" in the request, not just the total time, making it easy to identify the bottleneck.
 
@@ -67,15 +93,23 @@ class LLMTrace:
 **Solution:** Use an AI Gateway (like Portkey or Helicone) to track costs and usage per user and per project.
 
 ```python
-import openai
+import os
+from openai import OpenAI
 
-# The gateway URL acts as a proxy that logs everything
-client = openai.OpenAI(
-    base_url="https://api.helicone.ai/v1",
-    default_headers={"Helicone-Auth": "Bearer YOUR_KEY"}
+# 1. Configure the client to point to the Gateway
+# The Gateway URL acts as a middleware that logs costs
+client = OpenAI(
+    base_url="https://api.helicone.ai/v1", # Example Gateway
+    api_key=os.getenv("OPENAI_API_KEY"),
+    default_headers={
+        "Helicone-Auth": f"Bearer {os.getenv('HELICONE_KEY')}",
+        "Helicone-Property-App": "CustomerSupport_v2",
+        "Helicone-Property-Environment": "Production"
+    }
 )
 
-# Every request now appears on a dashboard with exact token cost data.
+# Every request made via this client is now tracked with 100% financial accuracy.
+# response = client.chat.completions.create(model="gpt-4o", messages=[...])
 ```
 **Why this is preferred:** It requires **Zero Code Changes** to your logic while providing instant financial governance and "Hard Budgets" for your AI system.
 
@@ -86,10 +120,22 @@ client = openai.OpenAI(
 **Solution:** Link a user's feedback (1 or 0) directly to the `trace_id` of the original request.
 
 ```python
-def log_user_feedback(trace_id, score, comment=None):
-    # Sends feedback to your observability platform (e.g. LangSmith)
-    print(f"Feedback for Trace {trace_id}: {score}/1")
-    # This data is used to find the 'Failures' in your Golden Dataset.
+def log_user_feedback(trace_id: str, score: int, comment: str = ""):
+    """
+    Persists user sentiment for a specific AI transaction.
+    Score: 1 (Positive), 0 (Negative)
+    """
+    payload = {
+        "trace_id": trace_id,
+        "sentiment_score": score,
+        "user_comment": comment,
+        "timestamp": time.time()
+    }
+    # Send to your observability sink (e.g. LangSmith or internal DB)
+    # langsmith.create_feedback(trace_id, score=score)
+    print(f"Feedback logged for {trace_id}: {score}")
+
+# This data is used to identify which prompt versions are actually succeeding.
 ```
 **Why this is preferred:** User feedback is the **Ultimate Truth**. It allows you to build a "Feedback Loop" where your AI system improves based on actual user interactions.
 
@@ -100,14 +146,28 @@ def log_user_feedback(trace_id, score, comment=None):
 **Solution:** Implement a "Maximum Step" count and a "Maximum Cost" threshold per request.
 
 ```python
-def agent_executor(goal, max_steps=10, max_cost=0.50):
-    steps = 0
-    total_cost = 0.0
-    while steps < max_steps and total_cost < max_cost:
-        # 1. Step logic...
-        # 2. Update total_cost based on token usage
-        # 3. If exceeded, trigger a hard stop
-        pass
+class AgentMonitor:
+    def __init__(self, max_steps: int = 10, max_cost: float = 0.50):
+        self.max_steps = max_steps
+        self.max_cost = max_cost
+        self.steps = 0
+        self.total_cost = 0.0
+
+    def check_and_increment(self, step_cost: float):
+        self.steps += 1
+        self.total_cost += step_cost
+
+        if self.steps > self.max_steps:
+            raise RuntimeError("Agent recursion limit hit.")
+
+        if self.total_cost > self.max_cost:
+            raise RuntimeError("Financial budget for request exceeded.")
+
+# Usage in a loop:
+# monitor = AgentMonitor()
+# while True:
+#     res = call_llm(...)
+#     monitor.check_and_increment(res.cost)
 ```
 **Why this is preferred:** It provides **Safety and Predictability**. In production, an agent that "gives up" after 10 steps is better than an agent that runs forever and spends your entire budget.
 
@@ -120,15 +180,25 @@ def agent_executor(goal, max_steps=10, max_cost=0.50):
 ```python
 import re
 
-def redact_pii(text):
-    # Simplified regex for a social security number
-    ssn_pattern = r'\d{3}-\d{2}-\d{4}'
-    if re.search(ssn_pattern, text):
-        return "[REDACTED]"
-    return text
+def redact_sensitive_data(text: str) -> str:
+    """
+    Deterministic redaction of potential PII.
+    """
+    # Pattern for typical API keys or sensitive IDs
+    patterns = {
+        "API_KEY": r"sk-[a-zA-Z0-9]{32}",
+        "SSN": r"\d{3}-\d{2}-\d{4}"
+    }
 
-# output = call_llm(prompt)
-# safe_output = redact_pii(output)
+    clean_text = text
+    for label, pattern in patterns.items():
+        clean_text = re.sub(pattern, f"[{label}_REDACTED]", clean_text)
+
+    return clean_text
+
+# Execution Example
+# raw_ai_response = "The key is sk-1234567890abcdef1234567890abcdef"
+# safe_output = redact_sensitive_data(raw_ai_response)
 ```
 **Why this is preferred:** It is a **deterministic safety layer**. You should never trust the LLM to "not reveal PII"; you must physically check the output before it leaves your system.
 
@@ -139,9 +209,14 @@ def redact_pii(text):
 **Solution:** Randomly sample 1% of production logs and send them to a "Judge LLM" to check for constraint adherence.
 
 ```python
-def monitor_drift(sample_log):
-    # Ask GPT-4o: "Did the AI follow the instructions here? YES/NO"
-    # If NO, increment an alert counter.
+def monitor_drift(ai_response: str):
+    # Ask a cheaper model to act as a 'Mini Judge'
+    # judge_prompt = f"Does this follow formatting rules? {ai_response}"
+    # score = call_mini_judge(judge_prompt)
+    # log_metric("Instruction_Follow_Score", score)
+    pass
+
+# If the score drops below 0.8, trigger an alert to the engineering team.
 ```
 **Why this is preferred:** It catches **Silent Regressions** that happen when the model provider updates the model or when the distribution of user queries changes.
 
@@ -152,9 +227,15 @@ def monitor_drift(sample_log):
 **Solution:** Export the exact "Trace" (prompt + context) from your observability tool and run it through your local debugger.
 
 ```python
-def reproduce_bug(trace_data):
-    # Re-run the exact same prompt configuration
-    # and use an 'Assert' to find where the reasoning broke.
+def debug_production_trace(trace_id: str):
+    # 1. Fetch trace data from log store
+    # trace = logs.get(trace_id)
+
+    # 2. Re-run locally with same model and parameters
+    # result = call_llm(trace.prompt, model=trace.model, temp=trace.temp)
+
+    # 3. Assert failure
+    # assert result == trace.output
     pass
 ```
 **Why this is preferred:** It turns **Production Failures into Test Cases**, ensuring that once you fix an issue, it stays fixed forever (Regression Testing).
@@ -166,10 +247,13 @@ def reproduce_bug(trace_data):
 **Solution:** Continuously track "Time-to-First-Token" (TTFT) for multiple models to find the best performer.
 
 ```python
-# Metrics to track:
-# - TTFT: UX (How fast the user sees text)
-# - TPS: Throughput (How fast the text generates)
-# - E2E: Total request time.
+# Metrics recorded for every production request:
+# - TTFT: 450ms (User sees start)
+# - TPS: 30 tokens/sec (Generation speed)
+# - E2E: 1.2s (Total time)
+
+# Dashboard: 'TTFT by Model'
+# Decision: If TTFT for GPT-4o > 2s, switch to Llama 3 for 5 minutes.
 ```
 **Why this is preferred:** It focuses on the **User Experience** metrics that actually drive retention. A model with high accuracy but 10-second TTFT will frustrate users.
 

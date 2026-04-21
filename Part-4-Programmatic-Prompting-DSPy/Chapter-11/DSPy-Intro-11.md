@@ -44,15 +44,33 @@ These examples demonstrate how to build your first DSPy programs and move from "
 ```python
 import dspy
 
+# 1. Define the Signature (The logic contract)
 class SentimentAnalysis(dspy.Signature):
     """Analyze the sentiment and tone of the given customer feedback."""
-    feedback = dspy.InputField()
+
+    # Input fields define what the model receives
+    feedback = dspy.InputField(desc="Raw text from a user review")
+
+    # Output fields define what the model must produce
     sentiment = dspy.OutputField(desc="Positive, Negative, or Neutral")
     tone = dspy.OutputField(desc="Professional, Frustrated, or Happy")
 
-# Usage:
-# predictor = dspy.Predict(SentimentAnalysis)
-# response = predictor(feedback="The app is slow and I hate it.")
+# 2. Setup the Predictor
+# Predict is a module that takes a signature and generates a prompt
+def run_sentiment_task(text: str):
+    predictor = dspy.Predict(SentimentAnalysis)
+
+    # DSPy automatically generates the instructions based on field names and descriptions
+    try:
+        response = predictor(feedback=text)
+        return response.sentiment, response.tone
+    except Exception as e:
+        return f"Error: {e}"
+
+# Execution Example
+if __name__ == "__main__":
+    # res = run_sentiment_task("The app is slow and I hate it.")
+    pass
 ```
 **Why this is preferred:** It is **Declarative**. You've told the system *what* you want (sentiment and tone), and DSPy handles the *how* (the prompt instructions) for you.
 
@@ -63,10 +81,23 @@ class SentimentAnalysis(dspy.Signature):
 **Solution:** Wrap your Signature in the `dspy.ChainOfThought` module.
 
 ```python
-cot_predictor = dspy.ChainOfThought(SentimentAnalysis)
-# response = cot_predictor(feedback="I liked the acting, but the story was weak.")
-# This automatically prompts the model to generate a 'Rationale'
-# before providing the final sentiment and tone.
+import dspy
+
+def run_reasoning_task(query: str):
+    """
+    Uses ChainOfThought to raise the reasoning ceiling.
+
+    Logic:
+    1. Model generates 'Rationale'
+    2. Model generates 'Sentiment' and 'Tone'
+    """
+    # Simply swap Predict for ChainOfThought
+    cot_predictor = dspy.ChainOfThought(SentimentAnalysis)
+
+    # response = cot_predictor(feedback=query)
+    # print(f"Reasoning: {response.rationale}")
+    # print(f"Result: {response.sentiment}")
+    pass
 ```
 **Why this is preferred:** You don't have to manually write the "Reasoning:" header or "Think step-by-step" instruction. DSPy's built-in module handles the state-management consistently across different models.
 
@@ -77,13 +108,17 @@ cot_predictor = dspy.ChainOfThought(SentimentAnalysis)
 **Solution:** Define a signature with multiple `InputField`s and let the compiler handle the formatting.
 
 ```python
+import dspy
+
 class ContextAnswer(dspy.Signature):
     """Answer the question accurately using ONLY the provided context."""
-    context = dspy.InputField()
+
+    context = dspy.InputField(desc="Retrieved facts from the knowledge base")
     question = dspy.InputField()
     answer = dspy.OutputField()
 
 # predictor = dspy.Predict(ContextAnswer)
+# response = predictor(context="...", question="...")
 ```
 **Why this is preferred:** It defines a clean **Data Interface** for your AI task. You can easily swap the source of the `context` (e.g., from a vector DB or a local file) without touching the AI logic.
 
@@ -94,20 +129,27 @@ class ContextAnswer(dspy.Signature):
 **Solution:** Subclass `dspy.Module` to define a custom flow of multiple signatures.
 
 ```python
+import dspy
+
 class MultiHopSearch(dspy.Module):
     def __init__(self):
         super().__init__()
-        # Define the sub-steps
+        # Define internal sub-modules
         self.generate_query = dspy.Predict("question -> search_query")
         self.generate_answer = dspy.ChainOfThought(ContextAnswer)
 
-    def forward(self, question):
-        # 1. Logic to generate search terms
+    def forward(self, question: str):
+        # 1. Generate search terms
         query = self.generate_query(question=question).search_query
-        # 2. (In practice, fetch context from a DB using 'query')
-        context = "User record from DB..."
-        # 3. Logic to generate final answer using context
+
+        # 2. (Mock) Fetch context using the query
+        context = f"Internal search results for {query}..."
+
+        # 3. Generate final answer
         return self.generate_answer(context=context, question=question)
+
+# agent = MultiHopSearch()
+# result = agent.forward("Who is the CEO?")
 ```
 **Why this is preferred:** It treats the AI workflow like a **Standard Python Class**. This makes it easy to test each step individually and version the entire "Agent" as a single artifact.
 
@@ -119,9 +161,10 @@ class MultiHopSearch(dspy.Module):
 
 ```python
 # Inside a Module's forward method:
-response = self.generate_answer(context=context, question=question)
-dspy.Assert(len(response.answer.split()) < 50,
-            "The answer is too long, please summarize it more concisely.")
+# res = self.generate_answer(context=ctx, question=q)
+
+# dspy.Assert(len(res.answer.split()) < 30,
+#             "Answer too long! Please summarize more concisely.")
 ```
 **Why this is preferred:** If the constraint is failed, DSPy will automatically **backtrack** and ask the LLM to rewrite the response using the feedback as a new instruction.
 
@@ -134,11 +177,15 @@ dspy.Assert(len(response.answer.split()) < 50,
 ```python
 from dspy.teleprompters import BootstrapFewShot
 
-# trainset = [Example(question="...", answer="..."), ...]
-optimizer = BootstrapFewShot(metric=my_accuracy_metric)
+# 1. Define a simple metric (True/False or 0-1)
+def my_metric(example, pred, trace=None):
+    return example.answer.lower() == pred.answer.lower()
 
-# 'Compile' the program into an optimized version
-# compiled_bot = optimizer.compile(MultiHopSearch(), trainset=trainset)
+# 2. Initialize the Optimizer
+optimizer = BootstrapFewShot(metric=my_metric, max_bootstrapped_demos=4)
+
+# 3. 'Compile' the module into an optimized program
+# compiled_bot = optimizer.compile(MultiHopSearch(), trainset=train_data)
 ```
 **Why this is preferred:** It turns prompt engineering into a **Machine Learning Optimization**. The system learns the best prompt by mathematically searching for the one that maximizes your metric.
 
@@ -152,7 +199,9 @@ optimizer = BootstrapFewShot(metric=my_accuracy_metric)
 class TaskExtractor(dspy.Signature):
     """Extract tasks from a chat log."""
     chat_log = dspy.InputField()
-    tasks = dspy.OutputField(desc="A list of task objects with 'owner' and 'action' keys")
+    tasks = dspy.OutputField(
+        desc="A JSON list of objects with 'owner' and 'action' keys"
+    )
 ```
 **Why this is preferred:** DSPy automatically generates the correct "Formatting Instructions" (e.g., JSON schema hints) based on your model's specific capabilities.
 
@@ -163,11 +212,13 @@ class TaskExtractor(dspy.Signature):
 **Solution:** Just swap the global "Language Model" (LM) configuration in your Python script.
 
 ```python
-# Switch to Llama 3 via Ollama
-llama_model = dspy.OllamaLocal(model="llama3")
-with dspy.context(lm=llama_model):
-    # Your entire DSPy program now runs on Llama 3!
-    # response = my_dspy_agent(question="...")
+# Switch to Llama 3 via Ollama or vLLM
+# llama = dspy.OllamaLocal(model="llama3:8b")
+# with dspy.context(lm=llama):
+#     # The EXACT same program code now runs on Llama 3.
+#     # DSPy will handle the instruction differences automatically.
+#     agent = MultiHopSearch()
+#     result = agent.forward("What is the capital of France?")
 ```
 **Why this is preferred:** It provides the ultimate **Future-Proofing**. Your business logic (the Signature and Module) is now completely decoupled from the specific API or model version.
 

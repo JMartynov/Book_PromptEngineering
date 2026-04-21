@@ -45,15 +45,20 @@ These examples demonstrate how to build industrial-grade AI systems with safety 
 
 ```python
 import dspy
+from typing import Literal
 
-class LoanApproval(dspy.Signature):
-    """Evaluate a loan application based on credit score and income."""
+# 1. Define the Immutable Business Logic
+class LoanAudit(dspy.Signature):
+    """Evaluate a loan application based on credit history and debt-to-income."""
+
     credit_score = dspy.InputField()
     annual_income = dspy.InputField()
-    decision = dspy.OutputField(desc="APPROVED or REJECTED")
-    reasoning = dspy.OutputField(desc="Step-by-step logic for the decision")
+    current_debt = dspy.InputField()
 
-# This logic is 'Compiled' and frozen for production.
+    decision = dspy.OutputField(desc="MUST be 'APPROVED' or 'REJECTED'")
+    risk_rationale = dspy.OutputField(desc="Detailed justification for the decision")
+
+# In 2026, this 'Logic' is compiled once and deployed as a hashed artifact.
 ```
 **Why this is preferred:** It is **Auditable and Reproducible**. The bank can "Audit the Weights" of the optimized prompt to ensure no illegal bias was introduced during the optimization phase.
 
@@ -64,11 +69,19 @@ class LoanApproval(dspy.Signature):
 **Solution:** Use a specialized guardrail function that runs *before* the main LLM call.
 
 ```python
-def check_jailbreak(user_input: str):
-    # Call a specialized 'Safety Model' (e.g. Llama-Guard)
-    # result = safety_model.predict(user_input)
-    if "PROMPT_INJECTION" in result:
-        raise SecurityException("Access Denied: Malicious input detected.")
+from typing import Optional
+
+def security_gateway_filter(user_input: str) -> Optional[str]:
+    """Scans for prompt injection and malicious intent before processing."""
+
+    # 1. Call a specialized 'Safety Model' fine-tuned on Jailbreaks
+    # safety_res = safety_model.predict(user_input)
+
+    # Mocking a detection of 'Instruction Overriding'
+    if "ignore all previous" in user_input.lower():
+        raise PermissionError("SECURITY ALERT: Prompt Injection Attempt Blocked.")
+
+    return user_input # Proceed if safe
 ```
 **Why this is preferred:** it provides **Defense in Depth**. Even if the primary LLM's safety filters fail, the independent guardrail model acts as a secondary "Hard Stop."
 
@@ -79,13 +92,20 @@ def check_jailbreak(user_input: str):
 **Solution:** Use a standardized interface that abstracts the provider.
 
 ```python
-class PrivateLLM:
-    def __init__(self, endpoint="http://internal-vllm:8000"):
-        self.endpoint = endpoint
+import requests
 
-    def invoke(self, prompt):
-        # Calls the internal Llama 3 instance
-        pass
+class CorporateLLM:
+    """Wrapper for internal, privacy-hardened inference servers."""
+
+    def __init__(self, endpoint: str = "https://ai.internal.corp/v1"):
+        self.endpoint = endpoint
+        self.cert_path = "/etc/ssl/certs/corp-ca.pem"
+
+    def invoke(self, prompt: str) -> str:
+        # 1. Ensure traffic never leaves the internal VPC
+        # 2. Apply corporate auth tokens
+        # response = requests.post(self.endpoint, json={"p": prompt}, verify=self.cert_path)
+        return "Internal Model Response"
 ```
 **Why this is preferred:** It enables **Model Sovereignty**. The enterprise owns the infrastructure and the data, fulfilling strict compliance requirements (SOC2, HIPAA).
 
@@ -98,10 +118,20 @@ class PrivateLLM:
 ```python
 import re
 
-def redact_output(text: str):
-    # Scrub SSNs, Credit Cards, and Internal IP Addresses
-    clean_text = re.sub(r'\d{3}-\d{2}-\d{4}', '[REDACTED]', text)
-    return clean_text
+def scrub_output_pii(text: str) -> str:
+    """Hard-redaction of sensitive data patterns from AI responses."""
+
+    # Redact Social Security Numbers
+    text = re.sub(r'\d{3}-\d{2}-\d{4}', '[REDACTED_SSN]', text)
+
+    # Redact Internal IP Addresses
+    text = re.sub(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', '[REDACTED_IP]', text)
+
+    return text
+
+# Execution Example:
+# raw = "The server at 192.168.1.1 is failing."
+# clean = scrub_output_pii(raw) # "The server at [REDACTED_IP] is failing."
 ```
 **Why this is preferred:** It is a **Deterministic Insurance Policy**. It ensures that even if the AI "hallucinates" private data from its training set, that data never reaches the end user.
 
@@ -112,9 +142,17 @@ def redact_output(text: str):
 **Solution:** Use "Metadata Headers" in your AI Gateway to track usage by department ID.
 
 ```python
-def call_gateway(prompt, dept_id):
-    headers = {"X-Department-ID": dept_id}
-    # result = requests.post(GATEWAY_URL, json={"p": prompt}, headers=headers)
+def call_enterprise_gateway(prompt: str, dept_id: str):
+    """Sends a request with mandatory financial metadata."""
+
+    headers = {
+        "X-Corp-Department": dept_id,
+        "X-Project-ID": "Alpha-2026",
+        "Authorization": "Bearer CORP_SYSTEM_TOKEN"
+    }
+
+    # The gateway uses these headers to update the 'Dept Budget' in real-time
+    # requests.post(GATEWAY_URL, json={"prompt": prompt}, headers=headers)
 ```
 **Why this is preferred:** It provides **Financial Transparency**. The IT department can charge back AI costs to the specific business units that generate them.
 
@@ -125,9 +163,17 @@ def call_gateway(prompt, dept_id):
 **Solution:** Use a "Voting" pattern where three different models (GPT-4, Claude, and Llama) must agree on the final answer.
 
 ```python
-def consensus_check(responses: list):
-    # Logic: If 2 out of 3 agree, proceed. Else, escalate to human.
-    pass
+def enterprise_consensus_check(results: list) -> bool:
+    """Only allows a transaction if there is 100% agreement between models."""
+
+    unique_decisions = set(results)
+
+    if len(unique_decisions) == 1:
+        return True # Unified agreement
+
+    # Disagreement found!
+    # trigger_escalation_to_manager()
+    return False
 ```
 **Why this is preferred:** It maximizes **Reliability**. The probability of three different models from different providers having the same hallucination at the same time is near zero.
 
@@ -138,13 +184,21 @@ def consensus_check(responses: list):
 **Solution:** Automatically save the `(Input, Output, TraceID, PromptHash)` to a tamper-proof log (e.g. AWS QLDB).
 
 ```python
-def log_audit_trail(request, response, trace_id):
-    db.save_audit({
-        "timestamp": now(),
-        "input": request,
-        "output": response,
-        "logic_version": "v1.4.2"
-    })
+from datetime import datetime
+
+def log_audit_trail(request_payload: dict, response_payload: dict):
+    """Persists a permanent record of the AI's reasoning for legal compliance."""
+
+    audit_record = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "logic_version": "v1.4.2-compiled",
+        "input_hash": hash(str(request_payload)),
+        "decision_path": response_payload.get("reasoning"),
+        "approved_by": "System_Auto_Process"
+    }
+
+    # Save to immutable ledger
+    # db.save_secure(audit_record)
 ```
 **Why this is preferred:** It ensures **Regulatory Compliance**. When an auditor asks why a loan was rejected, you can provide the exact reasoning and the version of the logic used.
 
@@ -155,9 +209,14 @@ def log_audit_trail(request, response, trace_id):
 **Solution:** Implement "Token Buckets" at the Gateway layer.
 
 ```python
-# Gateway Configuration:
-# App "SupportBot" -> Max 500 tokens / sec
-# App "ResearchBot" -> Max 2000 tokens / sec
+# Gateway Configuration (Conceptual):
+#
+# [QUOTA_MANAGER]
+# App: "Public_Support_Bot" -> Priority: CRITICAL | Limit: 5000 TPS
+# App: "Internal_HR_Tool"   -> Priority: LOW      | Limit: 50   TPS
+#
+# If HR Tool tries to spike, it gets a 429 Error,
+# while the Support Bot continues to function.
 ```
 **Why this is preferred:** It provides **System Stability**. It prevents a single "Bad Actor" (internal or external) from bringing down the entire organization's AI infrastructure.
 

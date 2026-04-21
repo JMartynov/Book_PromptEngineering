@@ -44,16 +44,50 @@ These examples demonstrate how to build robust context management systems using 
 **Solution:** Use a "Reranker" (a smaller, faster model) to score the 10 results and only inject the top 2 into the final prompt.
 
 ```python
-# In 2026, we use tools like Cohere Rerank or BGE-Reranker
-def rerank_documents(query: str, docs: list) -> list:
-    # (Mocking a reranking model call)
-    # The model compares (query, doc) and returns a relevance score.
-    scored_docs = sorted(docs, key=lambda d: d['relevance_score'], reverse=True)
-    return scored_docs[:2] # Keep only the 'High-Signal' tokens
+import numpy as np
+from typing import List, Dict, Any
 
-# query = "How do I reset my password?"
-# raw_docs = get_vector_search_results(query)
-# signal_docs = rerank_documents(query, raw_docs)
+# Mock reranking model for demonstration
+def call_reranker_api(query: str, documents: List[str]) -> List[float]:
+    """
+    Simulates a Cross-Encoder (e.g., Cohere Rerank or BGE-Reranker)
+    that scores (Query, Document) pairs for exact relevance.
+    """
+    # In reality, this returns a relevance score from 0.0 to 1.0
+    return [np.random.uniform(0.1, 0.9) for _ in documents]
+
+def get_optimized_context(query: str, raw_retrieval_results: List[Dict[str, Any]], top_k: int = 2) -> str:
+    """
+    Stages context retrieval to maximize the Signal-to-Noise Ratio (SNR).
+
+    Logic:
+    1. Takes the top 10-20 results from a Vector DB.
+    2. Uses a Reranker to find the 2 docs that actually answer the query.
+    3. Prunes the rest to save model attention and tokens.
+    """
+    texts = [res['text'] for res in raw_retrieval_results]
+
+    # Stage 2: Reranking (High precision, high cost)
+    scores = call_reranker_api(query, texts)
+
+    # Sort by the new relevance score
+    scored_docs = sorted(zip(scores, raw_retrieval_results), key=lambda x: x[0], reverse=True)
+
+    # Keep only the high-signal tokens
+    signal_docs = [doc for score, doc in scored_docs[:top_k]]
+
+    return "\n\n".join([f"[DOC {i}] {d['text']}" for i, d in enumerate(signal_docs)])
+
+# Execution Example
+if __name__ == "__main__":
+    q = "How do I reset my password?"
+    results = [
+        {"text": "To reset password, click settings.", "id": 1},
+        {"text": "Security is important.", "id": 2},
+        {"text": "Office hours are 9-5.", "id": 3}
+    ]
+    # context = get_optimized_context(q, results)
+    # print(f"Optimized Context:\n{context}")
 ```
 **Why this is preferred:** It prevents "Information Dilution." By reducing the noise, you significantly increase the probability that the model will find the "needle" it needs to answer the question.
 
@@ -64,14 +98,35 @@ def rerank_documents(query: str, docs: list) -> list:
 **Solution:** Use an LLM to "Compress" the old parts of the history into a concise summary, while keeping the last 2 messages in full.
 
 ```python
-def compress_memory(full_history: list) -> str:
-    # Step 1: Keep the last 2 messages as 'Working Memory'
-    working_memory = full_history[-2:]
-    # Step 2: Summarize everything else into 'Summary Context'
-    old_history = full_history[:-2]
-    summary = call_llm(f"Summarize this conversation history: {old_history}")
+from typing import List, Dict
 
-    return f"SUMMARY OF PAST: {summary}\nLATEST MESSAGES: {working_memory}"
+def call_llm_summarizer(history: str) -> str:
+    """Simulates an LLM call to compress history."""
+    return "User is debugging a Python script and wants to use Pydantic."
+
+def manage_conversation_memory(chat_history: List[Dict[str, str]], limit: int = 5) -> str:
+    """
+    Maintains a 3-tier memory model:
+    1. Working Memory: The last 2 messages (Full text).
+    2. Episodic Memory: Older messages compressed into a summary.
+    3. Semantic Memory: (External knowledge base, not handled here).
+    """
+    if len(chat_history) <= limit:
+        return str(chat_history)
+
+    # Tier 1: Preserve Working Memory (Latest 2 turns)
+    working_memory = chat_history[-2:]
+
+    # Tier 2: Compress everything else
+    old_turns = chat_history[:-2]
+    summary = call_llm_summarizer(str(old_turns))
+
+    return f"SUMMARY OF PAST TURNS: {summary}\nLATEST TURNS: {working_memory}"
+
+# Execution Example
+if __name__ == "__main__":
+    history = [{"role": "u", "content": "Hi"}, {"role": "a", "content": "Hello"}] * 5
+    # context = manage_conversation_memory(history)
 ```
 **Why this is preferred:** It allows for "Infinite Context" conversations without the linear cost and latency increase of a growing prompt.
 
@@ -82,15 +137,33 @@ def compress_memory(full_history: list) -> str:
 **Solution:** Place the **Context** at the very beginning and the **Query** at the very end.
 
 ```python
-def build_optimized_order_prompt(context: str, query: str):
-    return f"""
-<context>
-{context}
-</context>
+def build_grounded_prompt(context_data: str, user_query: str) -> str:
+    """
+    Applies the Context-First pattern to maximize instruction following.
 
-USER QUERY: {query}
-(Remember: Answer using ONLY the context provided above.)
-"""
+    Structure:
+    1. Context (The Ground Truth)
+    2. Instructions (The Reasoning Rules)
+    3. Query (The Action Trigger)
+    """
+    return f"""
+<context_block>
+{context_data}
+</context_block>
+
+### INSTRUCTIONS:
+Answer the query based ONLY on the <context_block> above.
+If the information is not present, do not hallucinate; say 'NOT_FOUND'.
+
+### USER QUERY:
+{user_query}
+""".strip()
+
+# Execution Example
+if __name__ == "__main__":
+    data = "Our office is located at 123 Main St."
+    query = "Where is the office?"
+    # prompt = build_grounded_prompt(data, query)
 ```
 **Why this is preferred:** Research shows that putting the "Call to Action" (the query) at the end of the prompt improves "Instruction Following" scores by up to 15%.
 
@@ -101,8 +174,16 @@ USER QUERY: {query}
 **Solution:** Use distinct "Type Headers" and delimiters for each part of the context.
 
 ```python
-advanced_isolation_prompt = """
-[SOURCE: SYSTEM_LOGS | TYPE: JSON]
+def format_multimodal_context(logs: str, docs: str) -> str:
+    """Formats context with clear schema headers for multi-source disambiguation."""
+
+    return f"### CONTEXT DATA\n[SOURCE: SYSTEM_ERROR_LOGS]\n{logs}\n\n[SOURCE: DOCS]\n{docs}"
+
+# Execution Example
+if __name__ == "__main__":
+    l = '{"error": "timeout", "service": "payment-api"}'
+    d = "# Payment API\nTimeouts usually occur if the DB latency exceeds 500ms."
+    # print(format_multimodal_context(l, d))
 ```json
 { "error": "auth_failure", "user": "jd_99" }
 ```
@@ -123,10 +204,33 @@ Based on the LOGS and DOCUMENTATION above, what is the fix?
 **Solution:** Filter the context at the **Database Level** using metadata before it ever reaches the LLM.
 
 ```python
-def secure_context_fetch(query: str, user_id: int):
-    # This happens in the Vector DB (e.g. Pinecone/Qdrant)
-    # It is a 'Hard Filter' that the AI cannot bypass.
-    return db.search(query, filter={"owner_id": user_id, "is_private": False})
+from typing import List, Dict, Any
+
+class SecureRetriever:
+    """Ensures data privacy by filtering context at the retrieval layer."""
+
+    def fetch_authorized_context(self, query: str, user_role: str, user_id: str) -> List[str]:
+        # Simulation of a Vector DB search with metadata filtering
+        # In practice: db.search(query, filter={"allowed_roles": user_role})
+        raw_data = [
+            {"text": "General Policy", "role": "employee"},
+            {"text": "Manager Salaries", "role": "admin"}
+        ]
+
+        # Hard Filter in Python (The 'Security Gate')
+        authorized_context = [
+            d['text'] for d in raw_data
+            if d['role'] == user_role or d.get('owner_id') == user_id
+        ]
+
+        return authorized_context
+
+# Execution Example
+if __name__ == "__main__":
+    retriever = SecureRetriever()
+    # A 'junior' user will never see 'admin' context in the prompt
+    context = retriever.fetch_authorized_context("What are the salaries?", "junior", "user_123")
+    # print(context) # ['General Policy']
 ```
 **Why this is preferred:** It is the only way to ensure **Data Privacy**. You should never rely on the LLM's "Instructions" to keep data secret; you must engineer the context so it never sees the secret data in the first place.
 
@@ -137,14 +241,30 @@ def secure_context_fetch(query: str, user_id: int):
 **Solution:** Use a "Router" to identify the required skill and only load the relevant context for that skill.
 
 ```python
-def skill_router(user_query: str):
-    # LLM identifies the intent: "User wants a refund"
-    return "refund_policy"
+def classify_intent(query: str) -> str:
+    """Mock router: Classifies query intent."""
+    if "refund" in query.lower(): return "refund_policy"
+    return "general_faq"
 
-def build_skill_aware_prompt(user_query: str):
-    skill = skill_router(user_query)
-    policy_context = fetch_policy_from_db(skill)
-    return f"POLICY: {policy_context}\nUSER: {user_query}"
+def build_dynamic_skill_prompt(query: str) -> str:
+    """Demonstrates progressive disclosure by loading skill-specific context."""
+
+    intent = classify_intent(query)
+
+    # Load only the relevant "Skill" context from a dictionary or database
+    skills_db = {
+        "refund_policy": "Refunds are processed in 5 business days.",
+        "general_faq": "Our office is open from 9 AM to 5 PM EST."
+    }
+
+    relevant_context = skills_db.get(intent, "General company information...")
+
+    return f"RELEVANT_POLICY: {relevant_context}\n\nUSER_QUESTION: {query}"
+
+# Execution Example
+if __name__ == "__main__":
+    # Prompt will only contain the refund policy, keeping it small and focused.
+    prompt = build_dynamic_skill_prompt("How long do refunds take?")
 ```
 **Why this is preferred:** It keeps the "Attention Budget" focused. The model is 100% focused on the refund policy rather than being distracted by the cancellation or upgrade rules.
 
@@ -155,17 +275,33 @@ def build_skill_aware_prompt(user_query: str):
 **Solution:** Inject "Recency Metadata" and instruct the model to prioritize the most recent information.
 
 ```python
-def format_with_recency(docs: list):
-    formatted = ""
+from typing import List, Dict
+
+def format_context_with_recency(docs: List[Dict[str, str]]) -> str:
+    """Resolves conflicts by injecting recency metadata into the context."""
+
+    formatted_docs = []
     for doc in docs:
-        formatted += f"[Date: {doc['updated_at']}] {doc['content']}\n"
+        formatted_docs.append(f"[LAST UPDATED: {doc['date']}] Content: {doc['text']}")
+
+    context_str = "\n".join(formatted_docs)
 
     return f"""
-CONTEXT:
-{formatted}
+### DATA CONTEXT
+{context_str}
 
-RULE: If information conflicts, the document with the LATEST Date is the truth.
+### RESOLUTION RULE
+If information in the context conflicts (e.g. different prices or dates),
+always treat the document with the LATEST (most recent) 'LAST UPDATED' date as the truth.
 """
+
+# Execution Example
+if __name__ == "__main__":
+    data = [
+        {"date": "2023-01-01", "text": "Price is $50"},
+        {"date": "2024-05-01", "text": "Price is $60"}
+    ]
+    # prompt = format_context_with_recency(data)
 ```
 **Why this is preferred:** It provides a **Deterministic Resolution Rule** for the model's probabilistic reasoning, ensuring consistency in a world of changing data.
 
@@ -176,16 +312,30 @@ RULE: If information conflicts, the document with the LATEST Date is the truth.
 **Solution:** Ask the model to first evaluate if the context is sufficient before answering.
 
 ```python
-def build_self_checking_prompt(context: str, query: str):
-    return f"""
-STEP 1: Read the CONTEXT.
-STEP 2: Determine if the CONTEXT contains the answer to the QUERY.
-If NO, say 'I do not have enough info' and STOP.
-If YES, provide the answer.
+def build_self_checking_prompt(context: str, query: str) -> str:
+    """Builds a prompt that empowers the model to reject insufficient context."""
 
-CONTEXT: {context}
-QUERY: {query}
+    return f"""
+### INSTRUCTIONS
+1. Read the provided CONTEXT carefully.
+2. Determine if the CONTEXT contains the specific information needed to answer the QUERY.
+3. If the answer is NOT present, output ONLY the string: [INSUFFICIENT_CONTEXT].
+4. If the answer IS present, provide a direct and concise response.
+
+### CONTEXT
+{context}
+
+### QUERY
+{query}
 """
+
+# Execution Example
+if __name__ == "__main__":
+    c = "Our office is in New York."
+    q = "What is the capital of France?"
+    # response = call_llm(build_self_checking_prompt(c, q))
+    # if "[INSUFFICIENT_CONTEXT]" in response:
+    #     print("AI recognized it didn't have the data. Safe!")
 ```
 **Why this is preferred:** It reduces **Hallucination by Force**. By giving the model an "Explicit Exit," you prevent it from making things up when the context layer fails.
 

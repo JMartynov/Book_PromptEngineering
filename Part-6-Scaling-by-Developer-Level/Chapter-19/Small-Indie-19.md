@@ -44,14 +44,23 @@ These examples demonstrate how to build a production-ready AI application using 
 **Solution:** Define every AI interaction as a Pydantic model.
 
 ```python
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
 
 class UserStory(BaseModel):
-    title: str
-    description: str
-    priority: int = Field(..., ge=1, le=5)
+    """The structured contract for our AI's output."""
+    title: str = Field(..., description="Short, descriptive title")
+    description: str = Field(..., description="Full user story body")
+    priority: int = Field(..., ge=1, le=5, description="1 is low, 5 is critical")
 
-# This model is the 'Contract' for your whole app.
+    @field_validator('priority')
+    @classmethod
+    def check_priority(cls, v: int) -> int:
+        # Extra deterministic logic at the boundary
+        if v == 0: raise ValueError("Priority cannot be zero")
+        return v
+
+# This model ensures the 'AI Logic' matches the 'Backend Logic'.
 ```
 **Why this is preferred:** It provides **Immediate Validation**. If your LLM returns a priority of "high" instead of "1," Pydantic will catch it before it reaches your database.
 
@@ -65,14 +74,24 @@ class UserStory(BaseModel):
 import instructor
 from openai import OpenAI
 
-client = instructor.from_provider(OpenAI())
+# 1. Initialize the minimalist client
+client = instructor.from_provider(OpenAI(api_key="sk-..."))
 
-def extract_story(text: str) -> UserStory:
+def extract_story_from_text(raw_input: str) -> UserStory:
+    """Uses instructor for zero-boilerplate data extraction."""
+
+    # This single call replaces 30 lines of parsing logic
     return client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o-mini", # Cheap and fast for extraction
         response_model=UserStory,
-        messages=[{"role": "user", "content": text}]
+        messages=[{"role": "user", "content": f"Extract story from: {raw_input}"}]
     )
+
+# Execution Example
+if __name__ == "__main__":
+    # story = extract_story_from_text("Title: Login. Body: User needs to sign in. High priority.")
+    # print(f"Validated Priority: {story.priority}")
+    pass
 ```
 **Why this is preferred:** It is the **cleanest code** possible. No JSON parsing, no manual error handling. It's just a Python function that returns a Python object.
 
@@ -83,11 +102,30 @@ def extract_story(text: str) -> UserStory:
 **Solution:** Use a simple Python-based "Keyword Search" to filter context.
 
 ```python
-docs = ["Refund policy...", "Shipping info...", "Terms of service..."]
+from typing import List
 
-def get_context(query: str):
-    # Simple keyword match (The 'Poor Man's RAG')
-    return [d for d in docs if any(word in d.lower() for word in query.split())]
+class TinyRetriever:
+    """A zero-cost retriever for small datasets."""
+
+    def __init__(self, docs: List[str]):
+        self.docs = docs
+
+    def get_context(self, query: str) -> str:
+        """Finds documents containing query keywords."""
+        keywords = query.lower().split()
+
+        # Simple intersection search
+        matches = [
+            d for d in self.docs
+            if any(word in d.lower() for word in keywords)
+        ]
+
+        return "\n".join(matches[:3]) # Top 3 matches
+
+# Execution Example
+if __name__ == "__main__":
+    kb = TinyRetriever(["Refunds take 5 days.", "Shipping is free over $50."])
+    # context = kb.get_context("How long for refunds?")
 ```
 **Why this is preferred:** It is **Zero-Cost and Zero-Latency**. For small datasets (under 1,000 sentences), this is often more than enough to provide relevant context.
 
@@ -101,10 +139,18 @@ def get_context(query: str):
 import os
 from dotenv import load_dotenv
 
+# 1. Load variables from .env file
 load_dotenv()
 
-def get_client():
-    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+def get_config(key: str) -> str:
+    """Safely retrieves environment variables with strict error handling."""
+    value = os.getenv(key)
+    if not value:
+        # Crash early before user traffic arrives
+        raise KeyError(f"CRITICAL ERROR: Environment variable '{key}' is not set.")
+    return value
+
+# API_KEY = get_config("OPENAI_API_KEY")
 ```
 **Why this is preferred:** It follows **Security Best Practices** while keeping the setup simple enough for a solo dev.
 
@@ -115,11 +161,24 @@ def get_client():
 **Solution:** Ask the model to "Critique and Refine" in a single prompt.
 
 ```python
-def single_pass_refine(draft: str):
-    return f"""
-    Review this draft: "{draft}"
-    Find 2 errors and then output the final corrected version.
+def single_turn_refinement(raw_draft: str) -> str:
+    """Uses one LLM call to perform both critique and revision."""
+
+    prompt = f"""
+    ### ORIGINAL_DRAFT
+    {raw_draft}
+
+    ### TASK
+    1. Identify 2 grammatical or logical errors in the draft.
+    2. Output the FINAL corrected version.
+
+    ### FORMAT
+    ERRORS: <list>
+    FINAL_VERSION: <text>
     """
+
+    # return call_llm(prompt)
+    pass
 ```
 **Why this is preferred:** It provides a **Quality Boost** for the cost of only one LLM call, whereas a multi-agent loop would cost 3-4 calls.
 
@@ -132,11 +191,19 @@ def single_pass_refine(draft: str):
 ```python
 import streamlit as st
 
-st.title("AI Story Generator")
-user_input = st.text_input("Enter a topic")
-if st.button("Generate"):
-    # result = call_llm(user_input)
-    st.write(result)
+def run_indie_ui():
+    st.set_page_config(page_title="AI Story Dev")
+    st.title("🚀 Indie Story Engine")
+
+    topic = st.text_input("Enter a story topic:")
+
+    if st.button("Generate & Validate"):
+        with st.spinner("AI is thinking..."):
+            # story = extract_story_from_text(topic)
+            st.success("Story Generated!")
+            st.json({"title": "Mock Title", "priority": 5})
+
+# To run: 'streamlit run app.py'
 ```
 **Why this is preferred:** It allows you to get your **AI into the hands of users** in hours, not weeks.
 
@@ -149,11 +216,20 @@ if st.button("Generate"):
 ```python
 import time
 
-def timed_call(prompt):
-    start = time.time()
-    # response = call_llm(prompt)
-    duration = time.time() - start
-    print(f"Call took {duration:.2f} seconds")
+def track_inference_performance(func):
+    """Decorator to log latency of AI functions."""
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        end = time.perf_counter()
+        print(f"DEBUG: AI call took {end - start:.2f} seconds.")
+        return result
+    return wrapper
+
+@track_inference_performance
+def call_my_ai(prompt: str):
+    # ... llm logic ...
+    pass
 ```
 **Why this is preferred:** It provides **Minimalist Observability**. You don't need a full dashboard to know that a 15-second response time is a problem.
 
@@ -164,10 +240,18 @@ def timed_call(prompt):
 **Solution:** Use a simple "Character Count" or "Intent" check to decide which model to call.
 
 ```python
-def smart_route(user_query: str):
-    if len(user_query) > 500:
-        return "gpt-4o" # Complex tasks
-    return "gpt-4o-mini" # Simple tasks
+def route_to_model(user_input: str) -> str:
+    """Optimizes the Intelligence-to-Cost ratio via simple routing."""
+
+    # 1. Routing by Complexity (Length)
+    if len(user_input) > 1000:
+        return "gpt-4o" # Deep reasoning for long context
+
+    # 2. Routing by Task (Keywords)
+    if "code" in user_input.lower():
+        return "gpt-4o" # Coding requires high intelligence
+
+    return "gpt-4o-mini" # Defaults to cheap/fast model
 ```
 **Why this is preferred:** It optimizes your **Intelligence-to-Cost Ratio** without needing complex orchestration logic.
 

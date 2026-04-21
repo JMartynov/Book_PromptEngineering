@@ -65,17 +65,20 @@ instructions: "Classify the input as [BUG] or [FEATURE]."
 **Solution:** A simple utility function that loads the YAML and returns a structured object.
 
 ```python
-import yaml
+from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Optional
 
-def load_prompt(prompt_name: str, version: str):
-    path = f"prompts/{prompt_name}_{version}.yaml"
-    with open(path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
+class PromptCommit(BaseModel):
+    """Represents a versioned prompt artifact for Git-based PromptOps."""
+    prompt_id: str
+    version: str = Field(..., pattern=r'^v\\d+\\.\\d+\\.\\d+$')
+    commit_hash: str
+    author: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    logic_changes: str
 
-# Usage:
-# prompt_v1 = load_prompt("classifier", "v1")
-# print(prompt_v1['metadata']['model']) # gpt-4o-mini
+# Example usage: Every prompt change is logged as a software commit.
 ```
 **Why this is preferred:** It allows you to switch between versions (or even models) without changing a single line of your application logic.
 
@@ -86,13 +89,19 @@ def load_prompt(prompt_name: str, version: str):
 **Solution:** Use the standard `pytest` framework to run "Unit Tests" on your prompt's output for critical edge cases.
 
 ```python
-import pytest
+def test_prompt_regression(new_prompt, golden_dataset):
+    """Unit test for AI logic to ensure new versions don't degrade quality."""
 
-def test_classifier_v1_handles_empty_input():
-    config = load_prompt("classifier", "v1")
-    # (Mocking the LLM call)
-    response = call_llm(config, "")
-    assert response in ["[BUG]", "[FEATURE]", "UNKNOWN"]
+    scores = []
+    for example in golden_dataset:
+        # prediction = call_llm(new_prompt, example['input'])
+        # scores.append(calculate_metric(prediction, example['output']))
+        pass
+
+    mean_accuracy = sum(scores) / len(scores) if scores else 0
+
+    # CI/CD Gate: Logic fails if accuracy drops below threshold
+    assert mean_accuracy >= 0.85, f"Regression detected! Score: {mean_accuracy}"
 ```
 **Why this is preferred:** It integrates AI testing into the standard CI/CD pipeline used by the rest of your engineering team, making AI behavior "observable" to DevOps.
 
@@ -103,16 +112,20 @@ def test_classifier_v1_handles_empty_input():
 **Solution:** Create a "Smoke Test" subset of your data (5-10 critical cases) that runs in seconds before every commit.
 
 ```python
-smoke_tests = [
-    {"input": "The app crashed", "expected": "BUG"},
-    {"input": "I want dark mode", "expected": "FEATURE"}
-]
+def shadow_deploy_test(user_query):
+    """Runs the 'Candidate' prompt in parallel with 'Production' for A/B testing."""
 
-def run_smoke_tests(config):
-    for test in smoke_tests:
-        res = call_llm(config, test['input'])
-        if res != test['expected']:
-            raise Exception(f"Smoke test failed for: {test['input']}")
+    # 1. Primary: Production Prompt (Used for user response)
+    # prod_res = call_llm(PROD_PROMPT, user_query)
+
+    # 2. Shadow: Candidate Prompt (Result logged but not shown to user)
+    # cand_res = call_llm(CANDIDATE_PROMPT, user_query)
+
+    # 3. Log delta for later analysis
+    # log_shadow_metric(prod_res, cand_res)
+
+    # return prod_res
+    pass
 ```
 **Why this is preferred:** It provides **Immediate Feedback** to the engineer, catching obvious errors before they reach the expensive and slow full regression suite.
 
@@ -123,15 +136,14 @@ def run_smoke_tests(config):
 **Solution:** Use a randomizer to show different prompts to different users and track their "Success Rate."
 
 ```python
-import random
+def metadata_consistency_test(llm_output_json):
+    """Validates that model updates haven't changed the JSON schema."""
 
-def get_active_config(user_id):
-    # 90% see v1 (Stable), 10% see v2 (Canary)
-    # Using user_id ensures the same user always sees the same version
-    random.seed(user_id)
-    if random.random() < 0.1:
-        return load_prompt("classifier", "v2")
-    return load_prompt("classifier", "v1")
+    expected_keys = {"id", "category", "summary", "confidence"}
+    actual_keys = set(llm_output_json.keys())
+
+    if not expected_keys.issubset(actual_keys):
+        raise ValueError(f"Model drift detected! Missing keys: {expected_keys - actual_keys}")
 ```
 **Why this is preferred:** It allows for **Data-Driven Rollouts**. If the 10% Canary group has a spike in "Help Desk" tickets, you can roll back the v2 prompt instantly.
 
@@ -142,14 +154,12 @@ def get_active_config(user_id):
 **Solution:** Use environment variables to determine which prompt version to load.
 
 ```python
-import os
+import hashlib
 
-ENV = os.getenv("APP_ENV", "prod")
-
-def get_triage_config():
-    if ENV == "staging":
-        return load_prompt("triage", "experimental-v3")
-    return load_prompt("triage", "stable-v1")
+def get_prompt_fingerprint(text, model_id, temperature):
+    """Generates a unique ID for a specific prompt configuration."""
+    payload = f"{text}:{model_id}:{temperature}"
+    return hashlib.sha256(payload.encode()).hexdigest()
 ```
 **Why this is preferred:** It follows the standard **Software Development Life Cycle (SDLC)**, ensuring that "In-Progress" AI experiments never reach end users.
 
@@ -160,18 +170,12 @@ def get_triage_config():
 **Solution:** Generate a visual Markdown report after every evaluation run and commit it to Git.
 
 ```python
-def generate_report(v1_score, v2_score):
-    delta = v2_score - v1_score
-    status = "✅ IMPROVED" if delta > 0 else "❌ REGRESSION"
+def release_gate_check(eval_results):
+    """Final automated check before a prompt is deployed to production."""
 
-    report = f"""
-# Prompt Evaluation Report
-| Version | Avg Score | Delta | Status |
-| :--- | :--- | :--- | :--- |
-| v1 (Stable) | {v1_score:.2f} | - | - |
-| v2 (New) | {v2_score:.2f} | {delta:+.2f} | {status} |
-"""
-    with open("eval_report.md", "w") as f: f.write(report)
+    if eval_results['accuracy'] > 0.9 and eval_results['latency_ms'] < 1500:
+        return "STATUS: DEPLOY_READY"
+    return "STATUS: BLOCKED"
 ```
 **Why this is preferred:** It creates a **Paper Trail** of performance improvements, which is essential for team collaboration and management reporting.
 

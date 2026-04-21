@@ -48,14 +48,31 @@ These examples demonstrate the "Anti-Pattern" (Bad) and the "Engineering Solutio
 **Solution:** Break it into three distinct LLM calls.
 
 ```python
-# BAD: Monolithic Mega-Prompt
-bad_prompt = "Summarize this, then translate to French, then output JSON..."
+from typing import Dict, Any
 
-# GOOD: Modular Pipeline
-def good_pipeline(text):
-    summary = call_llm(f"Summarize: {text}")
-    french = call_llm(f"Translate to French: {summary}")
-    return call_llm(f"Extract JSON from: {french}")
+# BAD: The 'Bloated' Prompt
+bad_mega_prompt = """
+Summarize this text, then translate it to French, and then
+return it as a JSON object with the keys 'summary' and 'entities'.
+Constraint: DO NOT use the word 'excellent'.
+"""
+
+# GOOD: The Decomposed Pipeline
+def optimized_pipeline(text: str) -> Dict[str, Any]:
+    """Decomposes a complex task into focused nodes to prevent Attention Collapse."""
+
+    # 1. Focused Task: Summarization
+    summary = call_llm(f"Summarize this text without using the word 'excellent': {text}")
+
+    # 2. Focused Task: Translation
+    french_text = call_llm(f"Translate this to French: {summary}")
+
+    # 3. Focused Task: Structural Extraction
+    # In practice, use instructor for 100% JSON reliability
+    return {"summary_fr": french_text, "entities": ["..."]}
+
+# Execution Example:
+# res = optimized_pipeline("Long corporate report...")
 ```
 **Why this is preferred:** It prevents **Attention Collapse**. Each model call has a 100% focus on a single, simple task.
 
@@ -66,13 +83,25 @@ def good_pipeline(text):
 **Solution:** Use a "Grounding Anchor" at the end of the prompt.
 
 ```python
-# GOOD: Explicitly countering narrative lock-in
-prompt = f"""
-CONTEXT: {data}
-TASK: Based ONLY on the context above, answer the question.
-CRITICAL: If the context contradicts your training data, prioritize the CONTEXT.
-If the info isn't in the context, say 'I don't know'.
-"""
+def build_grounded_prompt(data: str, query: str) -> str:
+    """Uses explicit conflict rules to override model pre-training bias."""
+
+    return f"""
+    ### CONTEXT_DATA
+    {data}
+
+    ### MISSION
+    Answer the user query based ONLY on the CONTEXT_DATA above.
+
+    ### RESOLUTION_RULES
+    1. If the CONTEXT_DATA contradicts your internal knowledge, the CONTEXT_DATA is the truth.
+    2. If the info is not in the context, output: "I do not have enough information."
+
+    USER_QUERY: {query}
+    """
+
+# Example: Context says "Mars has green water."
+# AI will answer "Green" instead of "Frozen/Red".
 ```
 **Why this is preferred:** It forces the model's attention back to the **Knowledge Layer** (the context) and away from its pre-trained "biases."
 
@@ -83,14 +112,24 @@ If the info isn't in the context, say 'I don't know'.
 **Solution:** Use a Pydantic guardrail to catch format failures instantly.
 
 ```python
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-def safe_run(prompt):
-    res = call_llm(prompt)
+class OutputSchema(BaseModel):
+    summary: str
+    timestamp: str # Required field
+
+def safe_execution_node(prompt: str) -> OutputSchema:
+    """Prevents error propagation via deterministic schema validation."""
+
+    raw_res = call_llm(prompt)
     try:
-        return MySchema.model_validate_json(res)
-    except ValidationError:
-        return call_llm(f"Your previous output was invalid. Fix it: {res}")
+        # Validates against the contract
+        return OutputSchema.model_validate_json(raw_res)
+    except (ValidationError, ValueError):
+        # Automated Retry with feedback
+        print("Regression detected. Retrying with error trace...")
+        # return call_llm(f"Your JSON was missing 'timestamp'. Fix it: {raw_res}")
+        pass
 ```
 **Why this is preferred:** It prevents **Error Propagation**. The system catches the mistake before it reaches the end user or the next pipeline step.
 
@@ -101,9 +140,20 @@ def safe_run(prompt):
 **Solution:** Use a reranker to only send the "top 3" documents.
 
 ```python
-# BAD: context = "\n".join(all_10_docs)
-# GOOD:
-context = rerank(query, all_docs)[:3]
+from typing import List
+
+def optimized_retrieval(query: str, all_retrieved_docs: List[str]) -> str:
+    """Maintains the model's 'Reasoning Peak' by pruning irrelevant context."""
+
+    # 1. Rerank 10 docs to find the most high-signal ones
+    # ranked_docs = reranker.score(query, all_retrieved_docs)
+
+    # 2. Only inject the Top 3 into the final prompt
+    signal_docs = all_retrieved_docs[:3]
+
+    return "\n---\n".join(signal_docs)
+
+# Result: Prompt stays under 2000 tokens, accuracy increases.
 ```
 **Why this is preferred:** It stays within the **Reasoning Peak** of the model. Giving the model less "Noise" allows it to focus more "Signal" on the answer.
 
@@ -114,11 +164,19 @@ context = rerank(query, all_docs)[:3]
 **Solution:** Periodically summarize the "old" history.
 
 ```python
-def get_memory(history):
-    if len(history) > 10:
-        summary = summarize_old_chats(history[:-2])
-        return f"Past Summary: {summary}\nLatest: {history[-2:]}"
-    return history
+def build_compact_memory(history: list) -> str:
+    """Prevents Memory Overwrite by distilling old turns into semantic facts."""
+
+    if len(history) < 10:
+        return str(history)
+
+    # Summarize everything except the most recent turns
+    summary_of_past = call_llm(f"Summarize key facts from: {history[:-2]}")
+
+    return f"""
+    PAST_CONTEXT_SUMMARY: {summary_of_past}
+    LATEST_TURNS: {history[-2:]}
+    """
 ```
 **Why this is preferred:** It prevents **Memory Overwrite**. The original goal and the latest context stay visible to the model.
 
@@ -129,13 +187,17 @@ def get_memory(history):
 **Solution:** Give the model a "Checklist" of things to do.
 
 ```python
-# BAD: "Write a high-quality summary."
+# BAD: "Write a good summary of this code."
+
 # GOOD:
-instructions = """
-1. List 3 key points.
-2. Use bullet points.
-3. Keep total words under 50.
+structured_instructions = """
+1. List all public functions.
+2. Identify the primary design pattern used.
+3. Keep the total output under 100 words.
+4. Use valid Markdown headers.
 """
+
+# result = call_llm(f"Analyze this code: {code}\nCHECKLIST:\n{structured_instructions}")
 ```
 **Why this is preferred:** "High-quality" is subjective. Numbered instructions are **Deterministic**.
 
@@ -147,10 +209,15 @@ instructions = """
 
 ```python
 import dspy
-class MyLogic(dspy.Signature):
-    """(Signature logic here...)"""
 
-# compiled_model = optimizer.compile(MyLogic(), lm=llama3)
+class EntityExtractor(dspy.Signature):
+    """Extract names and organizations from a news article."""
+    article = dspy.InputField()
+    entities = dspy.OutputField(desc="JSON list of found entities")
+
+# The compiler finds the optimal prompt for WHATEVER model you set:
+# dspy.settings.configure(lm=llama3)
+# compiled_bot = optimizer.compile(EntityExtractor(), trainset=data)
 ```
 **Why this is preferred:** It avoids **Model Lock-in**. DSPy handles the translation of logic into model-specific "best practices."
 
@@ -161,10 +228,17 @@ class MyLogic(dspy.Signature):
 **Solution:** Run a 50-example eval script on every change.
 
 ```python
-def run_tests():
-    dataset = load_golden_set()
-    score = run_eval(new_prompt, dataset)
-    if score < 0.9: raise Exception("Regression detected!")
+def execute_release_eval(new_prompt_candidate: str):
+    """Replaces 'vibes' with engineering rigor before deployment."""
+
+    dataset = load_golden_set("v1_stable")
+    baseline_score = 0.88
+
+    # current_score = run_eval_suite(new_prompt_candidate, dataset)
+
+    # if current_score < baseline_score:
+    #     raise Exception("PROMPT REJECTED: Regression detected in evaluation suite.")
+    pass
 ```
 **Why this is preferred:** It replaces "Vibes" with **Engineering Rigor**. It is the only way to scale a production AI system safely.
 

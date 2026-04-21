@@ -48,17 +48,38 @@ These examples demonstrate the core logic behind automated prompt systems and ho
 **Solution:** Use a Meta-Prompt to "Expand" the intent into a detailed technical specification.
 
 ```python
-def expand_intent(raw_intent: str):
+from pydantic import BaseModel, Field
+from typing import List
+
+class TaskBlueprint(BaseModel):
+    """The technical specification for an AI task."""
+    persona: str = Field(..., description="The ideal AI role for this task")
+    success_criteria: List[str] = Field(..., description="Binary metrics for quality")
+    negative_constraints: List[str] = Field(..., description="Explicit 'DO NOT' rules")
+    json_schema: str = Field(..., description="The required output structure")
+
+def expand_raw_intent(user_intent: str) -> TaskBlueprint:
+    """Uses a Meta-Prompt to expand a vague goal into a detailed spec."""
+
     meta_prompt = f"""
-    The user wants: '{raw_intent}'.
-    Expand this into a 4-Block Prompt Specification:
-    - ROLE: Define the ideal persona.
-    - SUCCESS CRITERIA: 5 specific points.
-    - CONSTRAINTS: 3 things to avoid.
-    - OUTPUT CONTRACT: A Pydantic-compatible JSON schema.
+    ### USER_GOAL
+    {user_intent}
+
+    ### TASK
+    Expand the USER_GOAL into a professional 'TaskBlueprint'.
+    Consider edge cases, persona expertise, and structural requirements.
+    Return valid JSON matching the TaskBlueprint schema.
     """
-    # Result: A detailed 'Blueprint' for the AI system.
+
+    # raw_json = call_meta_llm(meta_prompt)
+    # return TaskBlueprint.model_validate_json(raw_json)
     pass
+
+# Execution Example
+if __name__ == "__main__":
+    pass
+    # blueprint = expand_raw_intent("Summarize financial reports for our CEO")
+    # print(blueprint.persona) # "Principal Financial Analyst and Chief of Staff"
 ```
 **Why this is preferred:** It uncovers **Hidden Requirements**. For example, the expansion might realize that a "summary" for a CEO needs to be bulleted and focus on ROI, which the user didn't explicitly say.
 
@@ -69,12 +90,29 @@ def expand_intent(raw_intent: str):
 **Solution:** Use "Diversity Prompting" to force the model to generate examples from different "Clusters."
 
 ```python
-def generate_diverse_data(spec):
-    # Cluster 1: Short, simple inputs
-    # Cluster 2: Long, complex inputs
-    # Cluster 3: Inputs with missing data (Edge cases)
-    # Cluster 4: Malicious/Adversarial inputs
+from typing import List, Dict
+
+def generate_synthetic_data(blueprint: TaskBlueprint, scenarios: List[str]) -> List[Dict]:
+    """Generates a diverse dataset based on a task specification."""
+
+    dataset = []
+    for scenario in scenarios:
+        gen_prompt = f"""
+        TASK_SPEC: {blueprint.model_dump_json()}
+        SCENARIO: Generate 3 examples for the '{scenario}' case.
+        OUTPUT: List of {{'input': str, 'expected_output': str}}
+        """
+        # examples = call_teacher_llm(gen_prompt)
+        # dataset.extend(examples)
+        pass
+
+    return dataset
+
+# Execution Example
+if __name__ == "__main__":
     pass
+    # my_scenarios = ["Minimal input", "Conflicting data", "Extreme length"]
+    # data = generate_synthetic_data(blueprint, my_scenarios)
 ```
 **Why this is preferred:** It ensures the **Generalization** of the final prompt. An AI trained on diverse data is much more robust to real-world "messy" user inputs.
 
@@ -85,12 +123,20 @@ def generate_diverse_data(spec):
 **Solution:** Run a 10-example benchmark with and without CoT and compare the accuracy gain.
 
 ```python
-def select_best_strategy(task_spec, examples):
-    score_direct = run_eval(task_spec, examples, method="Direct")
-    score_cot = run_eval(task_spec, examples, method="ChainOfThought")
+def select_optimal_architecture(dataset: List[Dict]) -> str:
+    """Benchmarks different prompting strategies to find the ROI winner."""
 
-    # Only use CoT if it improves accuracy by > 5%
-    return "CoT" if (score_cot - score_direct) > 0.05 else "Direct"
+    # 1. Test Direct Prompting
+    # score_direct = run_eval(dataset, strategy="Direct")
+
+    # 2. Test Chain-of-Thought (CoT)
+    # score_cot = run_eval(dataset, strategy="CoT")
+
+    # 3. Decision Logic: ROI Threshold
+    # Only use CoT if it provides a > 10% accuracy gain to justify the 2x cost.
+    # if (score_cot - score_direct) > 0.10:
+    #     return "CoT"
+    return "Direct"
 ```
 **Why this is preferred:** It optimizes for **Throughput and Cost**. It prevents you from "over-engineering" simple tasks that don't benefit from extra reasoning steps.
 
@@ -101,12 +147,25 @@ def select_best_strategy(task_spec, examples):
 **Solution:** Use a "Self-Refining" meta-prompt that rewrites the user's input into a professional 4-block structure in one call.
 
 ```python
-def quick_optimize(user_query: str):
-    return f"""
-    Rewrite the following user query into a professional Prompt System instruction.
-    Use the 4-Block architecture. Add 3 few-shot examples.
-    QUERY: {user_query}
+def lightweight_auto_optimize(raw_query: str) -> str:
+    """Immediately upgrades a rough user prompt into an engineered system prompt."""
+
+    optimizer_prompt = f"""
+    ### INPUT_QUERY
+    "{raw_query}"
+
+    ### TASK
+    Rewrite the INPUT_QUERY into a production-grade 4-Block Prompt.
+    - Block 1: Professional Persona
+    - Block 2: Clear Step-by-Step Instructions
+    - Block 3: Data Isolation markers (<context>)
+    - Block 4: Strict JSON Output Contract
+
+    ### RESPONSE:
     """
+
+    # return call_llm(optimizer_prompt)
+    pass
 ```
 **Why this is preferred:** It provides **Immediate Value** for ad-hoc tasks while still following the engineering best practices established in Part 1.
 
@@ -117,12 +176,16 @@ def quick_optimize(user_query: str):
 **Solution:** Iteratively remove the most "Low-Signal" sentences and check if accuracy drops.
 
 ```python
-def prune_prompt(prompt, baseline_acc):
+def prune_prompt_tokens(full_prompt: str, baseline_accuracy: float) -> str:
+    """Iteratively minimizes prompt length while maintaining accuracy."""
+
     # Logic:
-    # 1. Split prompt into sentences.
-    # 2. Remove sentence X.
-    # 3. If accuracy >= (baseline - 0.01), permanently remove X.
-    pass
+    # 1. Split prompt into list of 'Instruction Units'
+    # 2. For each unit, try running the eval WITHOUT it
+    # 3. If new_accuracy >= baseline_accuracy: permanently delete unit
+    # 4. Repeat until no more tokens can be removed
+
+    return "Minified Prompt Instructions"
 ```
 **Why this is preferred:** It finds the **Pareto Optimal** point where you get 99% of the performance for 50% of the cost.
 
@@ -133,11 +196,17 @@ def prune_prompt(prompt, baseline_acc):
 **Solution:** Use a translation layer to swap the "Syntax" while keeping the "Semantics" identical.
 
 ```python
-def translate_syntax(prompt, target_model):
-    if "claude" in target_model:
-        return rewrite_to_xml(prompt)
-    elif "gpt" in target_model:
-        return rewrite_to_markdown(prompt)
+def translate_prompt_for_model(optimized_logic: str, target_model: str) -> str:
+    """Rewrites instructions into the target model's 'Native Dialect'."""
+
+    if "claude" in target_model.lower():
+        # Instruction: Use XML tags and detailed preamble
+        pass
+    elif "gpt" in target_model.lower():
+        # Instruction: Use Markdown headers and Anchor-Last pattern
+        pass
+
+    return "Model-Specific Optimized Prompt"
 ```
 **Why this is preferred:** It prevents **Model Lock-in**. Your business logic remains portable across any LLM provider.
 
@@ -148,11 +217,17 @@ def translate_syntax(prompt, target_model):
 **Solution:** Ask the Auto-Prompt system to generate a detailed "Grading Rubric" based on the task spec.
 
 ```python
-def generate_rubric(expanded_intent):
-    # Output:
-    # 1. Does it mention the price? (Pass/Fail)
-    # 2. Is the tone neutral? (1-5)
-    # 3. Is the JSON valid? (Pass/Fail)
+def generate_automated_rubric(blueprint: TaskBlueprint) -> str:
+    """Automates the creation of QA criteria for the Judge LLM."""
+
+    rubric_prompt = f"""
+    SPECIFICATION: {blueprint.model_dump_json()}
+    TASK: Based on this spec, write a 1-10 Rubric for an AI Judge.
+    Define what constitutes a score of 10 (Success) vs 1 (Critical Failure).
+    """
+
+    # return call_llm(rubric_prompt)
+    pass
 ```
 **Why this is preferred:** It automates the **QA Setup**. The system creates its own "Tests" before it creates the "Code" (the prompt).
 
@@ -163,12 +238,18 @@ def generate_rubric(expanded_intent):
 **Solution:** Use the `PromptOptimizer` class to run the full "Intent -> Data -> Strategy -> Optimize" pipeline.
 
 ```python
-# from promptomatix import PromptOptimizer
+# from promptomatix import AutoOptimizer
 
-# optimizer = PromptOptimizer(strategy="heavy_search")
-# optimized_prompt = optimizer.run(
-#     raw_input="Help me extract shipping dates from emails"
+# 1. Initialize the heavy-duty optimizer
+# optimizer = AutoOptimizer(strategy="pareto_search", budget_usd=5.0)
+
+# 2. Run the autonomous pipeline
+# optimized_artifact = optimizer.run(
+#     goal="Identify high-value leads from raw sales transcripts",
+#     examples=0 # Cold Start: No examples needed
 # )
+
+# print(optimized_artifact.final_prompt)
 ```
 **Why this is preferred:** It gives you access to **SOTA Research** (like MIPROv2) out of the box, ensuring your AI systems are always using the most efficient possible prompts.
 

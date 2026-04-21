@@ -44,27 +44,39 @@ These examples demonstrate how to move from "text blobs" to "typed data" using i
 import instructor
 from pydantic import BaseModel, Field
 from openai import OpenAI
-from typing import List
+from typing import List, Optional
 
-# 1. Define the schema (The "Output Contract")
-class MeetingInfo(BaseModel):
-    date: str = Field(..., description="The date of the meeting")
-    attendees: List[str] = Field(..., description="List of names of people attending")
-    topics: List[str] = Field(..., description="Key topics to be discussed")
+# 1. Define the output contract using Pydantic
+class MeetingDetails(BaseModel):
+    """
+    Structured extraction of meeting metadata.
+    Field descriptions guide the LLM's understanding of each attribute.
+    """
+    date: str = Field(..., description="The date of the meeting (ISO 8601 preferred)")
+    attendees: List[str] = Field(..., description="Names of all individuals mentioned")
+    topics: List[str] = Field(..., description="Key technical topics discussed")
+    is_urgent: bool = Field(False, description="True if a deadline is mentioned")
 
-# 2. Patch the client (Instructor handles the JSON Schema and validation)
-client = instructor.from_provider(OpenAI())
+# 2. Patch the client (Instructor integrates with OpenAI/Anthropic/Gemini)
+client = instructor.from_provider(OpenAI(api_key="sk-..."))
 
-def extract_meeting(email_body: str) -> MeetingInfo:
+def extract_meeting_info(email_body: str) -> MeetingDetails:
+    """
+    Executes a type-safe extraction.
+    The response is returned as a validated MeetingDetails Python object.
+    """
+    # Instructor automatically handles the prompt engineering for the JSON Schema
     return client.chat.completions.create(
         model="gpt-4o",
-        response_model=MeetingInfo,
+        response_model=MeetingDetails,
         messages=[{"role": "user", "content": f"Extract info: {email_body}"}]
     )
 
-# email = "Hey, let's meet on Friday with Bob and Alice to discuss the budget."
-# info = extract_meeting(email)
-# print(info.date) # Type-safe access! "Friday"
+# Execution Example
+if __name__ == "__main__":
+    email = "Team, let's meet Friday at 2pm with Bob to discuss the Q3 budget."
+    # data = extract_meeting_info(email)
+    # print(f"Meeting Date: {data.date}") # Validated access!
 ```
 **Why this is preferred:** It eliminates the need for `json.loads()` and manual error handling. If the LLM returns invalid JSON, Instructor automatically retries with the error message.
 
@@ -76,17 +88,21 @@ def extract_meeting(email_body: str) -> MeetingInfo:
 
 ```python
 from enum import Enum
+from pydantic import BaseModel
 
-class TicketCategory(str, Enum):
+class SupportCategory(str, Enum):
+    """Rigidly defined categories for automated ticket routing."""
     BILLING = "billing"
     TECHNICAL = "technical"
+    SECURITY = "security"
     GENERAL = "general"
 
-class SupportTicket(BaseModel):
+class Ticket(BaseModel):
     subject: str
-    category: TicketCategory
+    category: SupportCategory # Forces the LLM to choose from the Enum
 
-# If the LLM returns "Invoicing", Pydantic will raise a ValidationError.
+# If the LLM returns "Invoicing", Pydantic will raise a ValidationError
+# during extraction, which can trigger an automated retry with the error msg.
 ```
 **Why this is preferred:** It turns a probabilistic model into a **Deterministic State Machine**. This is the only way to build reliable branching logic in AI systems.
 
@@ -97,7 +113,7 @@ class SupportTicket(BaseModel):
 **Solution:** Use Pydantic's `@field_validator` to check the data and provide feedback to the LLM during the retry loop.
 
 ```python
-from pydantic import field_validator
+from pydantic import BaseModel, field_validator
 
 class UserProfile(BaseModel):
     name: str
@@ -105,13 +121,17 @@ class UserProfile(BaseModel):
 
     @field_validator('age')
     @classmethod
-    def age_must_be_realistic(cls, v):
-        if v < 0 or v > 120:
-            raise ValueError("Age must be between 0 and 120")
+    def age_must_be_valid(cls, v: int) -> int:
+        """Deterministic business rule for age validation."""
+        if v < 0 or v > 125:
+            raise ValueError("Age must be between 0 and 125")
         return v
 
-# Instructor will catch the ValueError and send a prompt like:
-# "The field 'age' failed validation: Age must be between 0 and 120. Please correct."
+# Workflow:
+# 1. LLM returns {'name': 'Bob', 'age': -5}
+# 2. Validator raises ValueError
+# 3. Instructor sends: "The field 'age' failed validation: Age must be between 0 and 125."
+# 4. LLM corrects and returns {'name': 'Bob', 'age': 5}
 ```
 **Why this is preferred:** It moves "Business Logic" out of the prompt and into Python code, where it is easier to test and maintain.
 
@@ -122,17 +142,22 @@ class UserProfile(BaseModel):
 **Solution:** Use nested Pydantic models to define complex hierarchies.
 
 ```python
-class InvoiceItem(BaseModel):
+from typing import List
+from pydantic import BaseModel
+
+class LineItem(BaseModel):
+    """A single item on an invoice."""
     description: str
     quantity: int
     unit_price: float
 
 class Invoice(BaseModel):
-    vendor_name: str
-    items: List[InvoiceItem]
+    """Full extraction of an invoice including nested items."""
+    vendor: str
     total_amount: float
+    items: List[LineItem] # Nested structured objects
 
-# The LLM will reliably generate the full nested list of items.
+# The LLM will populate the 'items' list with validated LineItem objects.
 ```
 **Why this is preferred:** It ensures that the relationship between data points (e.g., item and quantity) is preserved, which is impossible with simple text extraction.
 
@@ -143,11 +168,14 @@ class Invoice(BaseModel):
 **Solution:** Include a `chain_of_thought` field in your Pydantic model. This forces the model to reason *inside* the structured output.
 
 ```python
-class SentimentWithReasoning(BaseModel):
-    chain_of_thought: str = Field(..., description="Step-by-step reasoning for the sentiment")
-    sentiment_score: float = Field(..., description="Score from -1.0 to 1.0")
+from pydantic import BaseModel, Field
 
-# The reasoning is captured but can be ignored by the UI.
+class SentimentResult(BaseModel):
+    """Sentiment analysis with internal reasoning."""
+    reasoning: str = Field(..., description="Step-by-step logic for the sentiment")
+    score: float = Field(..., description="Score from -1.0 to 1.0")
+
+# Your database stores 'score', while your audit logs store 'reasoning'.
 ```
 **Why this is preferred:** It combines the accuracy of CoT with the utility of structured output, providing a built-in "Audit Trail" for every decision the AI makes.
 
@@ -158,10 +186,19 @@ class SentimentWithReasoning(BaseModel):
 **Solution:** Define a `VerifiedExtraction` model that requires the LLM to provide a "Confidence" and a "Verification Step."
 
 ```python
+from pydantic import BaseModel, Field
+
 class VerifiedExtraction(BaseModel):
+    """An extraction that includes self-assessment metadata."""
     data: dict
     confidence: float = Field(..., ge=0.0, le=1.0)
-    is_verified: bool = Field(..., description="Did you double-check this against the source?")
+    is_verified: bool = Field(..., description="Did you double-check this fact?")
+
+def process_with_confidence(text: str):
+    # res = client.chat.completions.create(..., response_model=VerifiedExtraction)
+    # if res.confidence < 0.95:
+    #     trigger_human_review(res)
+    pass
 ```
 **Why this is preferred:** It encourages the model to "Self-Correct" before it sends the final payload, reducing the rate of confident hallucinations.
 
@@ -173,10 +210,12 @@ class VerifiedExtraction(BaseModel):
 
 ```python
 from typing import Optional
+from pydantic import BaseModel
 
 class Lead(BaseModel):
+    """Customer lead extraction with safe fallback for missing data."""
     name: str
-    phone: Optional[str] = None
+    phone: Optional[str] = None # Safe exit for missing data
     email: Optional[str] = None
 ```
 **Why this is preferred:** It reduces "Forced Hallucination." By making a field optional, you tell the model it's okay to say "I don't know" or "Not found."
@@ -188,15 +227,20 @@ class Lead(BaseModel):
 **Solution:** Use a wrapper class to generate a list of objects in a single call.
 
 ```python
+from typing import List
+from pydantic import BaseModel
+
 class TestCase(BaseModel):
-    input: str
+    """A single input-output pair for testing."""
+    input_str: str
     expected_output: str
 
 class TestSuite(BaseModel):
+    """A bulk collection of test cases generated in one pass."""
+    name: str
     cases: List[TestCase]
 
-# One prompt: "Generate 10 test cases for a login page."
-# Result: A single object containing 10 validated TestCase objects.
+# Result: A single object containing 10-50 validated TestCase objects.
 ```
 **Why this is preferred:** It is significantly more **Token Efficient** and reduces the total latency of your application.
 

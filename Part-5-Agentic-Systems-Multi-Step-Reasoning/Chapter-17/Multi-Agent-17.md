@@ -45,14 +45,23 @@ These examples demonstrate how to build multi-agent systems using modern pattern
 **Solution:** Use a Supervisor agent to route the query to the correct specialist.
 
 ```python
-from typing import Literal
+from typing import Literal, Dict
 from pydantic import BaseModel
 
-class Route(BaseModel):
-    next_agent: Literal["SQL_EXPERT", "WEB_EXPERT", "FINISH"]
+class RoutingDecision(BaseModel):
+    """The structured output of the Supervisor."""
+    next_specialist: Literal["SQL_EXPERT", "WEB_EXPERT", "FINISH"]
+    justification: str
 
-# Supervisor Prompt: "Based on the user query, who should act next?"
-# If user says "What's in the DB?", route to SQL_EXPERT.
+def supervisor_agent(query: str) -> RoutingDecision:
+    """Routes the query to the best specialized worker."""
+
+    prompt = f"Given the user query: '{query}', who is best suited to handle it? [SQL_EXPERT, WEB_EXPERT, or FINISH]"
+    # Result: RoutingDecision(next_specialist="SQL_EXPERT", justification="User is asking for order data.")
+    pass
+
+# Execution Example:
+# if "order" in query: route = "SQL_EXPERT"
 ```
 **Why this is preferred:** It prevents "Tool Confusion." The SQL expert never even sees the Web search tools, ensuring it stays focused on writing perfect SQL.
 
@@ -63,12 +72,15 @@ class Route(BaseModel):
 **Solution:** Wrap the "Research Agent" as a Python function (a Tool) and give it to the "Writer Agent."
 
 ```python
-def research_tool(query: str):
-    # This function triggers a separate, internal agent loop
-    # and returns a summarized string.
-    return research_agent.run(query)
+def deep_research_agent_tool(topic: str) -> str:
+    """Wraps a specialized researcher agent as a tool."""
 
-# The 'Writer Agent' just sees a single tool called 'get_research_data'
+    # Internal multi-step agent loop (Plan -> Search -> Scrape -> Summarize)
+    summary = "A 500-word comprehensive summary of the topic."
+    return summary
+
+# The high-level 'Writer Agent' only sees one tool:
+# Tool(name="DeepResearch", func=deep_research_agent_tool)
 ```
 **Why this is preferred:** It is the **simplest way to scale**. It allows you to build complex nested logic while keeping the top-level agent's context window clean.
 
@@ -79,9 +91,15 @@ def research_tool(query: str):
 **Solution:** Have two agents argue for different viewpoints and a third "Judge" agent decide the winner.
 
 ```python
-# Agent A: "The code is secure because X."
-# Agent B: "The code is insecure because Y."
-# Judge: "Based on both arguments, the code needs a fix for Y."
+# Agent A (Security Auditor): "I found a SQL injection in line 45."
+# Agent B (Performance Auditor): "The code is efficient, but I disagree with A's risk level."
+# Judge Agent: "I have reviewed both. Agent A is correct about the risk. Fix required."
+
+def run_consensus_loop(code: str):
+    # 1. Trigger Auditor A
+    # 2. Trigger Auditor B
+    # 3. Trigger Judge(A_output, B_output)
+    pass
 ```
 **Why this is preferred:** It increases the **Accuracy Floor**. Research shows that "Multi-Agent Debate" significantly reduces hallucinations in logical reasoning tasks.
 
@@ -92,14 +110,18 @@ def research_tool(query: str):
 **Solution:** Use a TypedDict to maintain a global "State" that all agents update.
 
 ```python
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, List
 from langgraph.graph.message import add_messages
 
-class AgentState(TypedDict):
-    # 'add_messages' ensures history is appended, not overwritten
-    messages: Annotated[list, add_messages]
+class TeamState(TypedDict):
+    """The shared persistent memory for the agent workforce."""
+    # 'add_messages' keeps a full history of the conversation
+    messages: Annotated[List[Dict], add_messages]
     research_notes: str
-    is_complete: bool
+    is_audit_complete: bool
+    final_report_path: str
+
+# All nodes (agents) receive this dictionary as their first argument.
 ```
 **Why this is preferred:** It provides **Auditability**. You can inspect the `AgentState` at any point in the process to see which agent added which piece of information.
 
@@ -110,11 +132,16 @@ class AgentState(TypedDict):
 **Solution:** Add a "Reviewer Agent" that runs the code and provides feedback to the Coder.
 
 ```python
-def reviewer_node(state: AgentState):
-    # 1. Extract code from state
-    # 2. Run 'pytest' or 'pylint'
-    # 3. If errors: add error msg to state and route back to 'CODER'
-    # 4. If success: route to 'FINISH'
+def reviewer_node(state: TeamState) -> Dict:
+    """Automates quality assurance for the team."""
+    code = state["messages"][-1].content
+    # errors = run_local_linter(code)
+
+    if errors:
+        return {"messages": [f"Fix these errors: {errors}"], "is_audit_complete": False}
+    return {"is_audit_complete": True}
+
+# Graph logic: if is_audit_complete == False: go back to 'CODER_NODE'
 ```
 **Why this is preferred:** It automates **Quality Assurance**. The user never sees the broken "First Draft" of the code; they only see the "Final, Verified" version.
 
@@ -128,9 +155,9 @@ def reviewer_node(state: AgentState):
 # supervisor_llm = ChatOpenAI(model="gpt-4o")
 # worker_llm = ChatOpenAI(model="gpt-4o-mini")
 
-# In the graph:
-# Node 'Manager' uses supervisor_llm
-# Node 'Cleaner' uses worker_llm
+# In your LangGraph:
+# workflow.add_node("manager", lambda s: supervisor_llm.invoke(s))
+# workflow.add_node("formatter", lambda s: worker_llm.invoke(s))
 ```
 **Why this is preferred:** It provides **Production ROI**. It allows you to spend your "Intelligence Budget" exactly where it's needed most (high-level planning) while using cheaper compute for repetitive tasks.
 
@@ -141,9 +168,11 @@ def reviewer_node(state: AgentState):
 **Solution:** Trigger both nodes simultaneously in a LangGraph and "Join" them at a "Consolidator" node.
 
 ```python
-# Graph:
-# START -> [ResearchNode, LegalNode] (Parallel)
-# [ResearchNode, LegalNode] -> ConsolidatorNode
+# Conceptual Workflow:
+# [START] -> [MANAGER]
+# [MANAGER] -> [RESEARCHER_NODE] AND [LEGAL_NODE] (Parallel)
+# [RESEARCHER_NODE, LEGAL_NODE] -> [CONSOLIDATOR_NODE]
+# [CONSOLIDATOR_NODE] -> [END]
 ```
 **Why this is preferred:** It optimizes for **User-Perceived Latency**. The user gets a comprehensive report in 15 seconds instead of 30.
 
@@ -154,10 +183,16 @@ def reviewer_node(state: AgentState):
 **Solution:** Implement a "Recursion Limit" and a "Loop Monitor" in the orchestration layer.
 
 ```python
-def check_recursion(state: AgentState):
-    if len(state['messages']) > 20:
-        return "human_intervention" # Halt and ask user
-    return "continue"
+def check_for_recursion(state: TeamState) -> str:
+    """Prevents runaway loops in the agent workforce."""
+
+    if len(state["messages"]) > 25:
+        return "HUMAN_ESCALATION" # Hard stop
+
+    if state["is_audit_complete"]:
+        return "FINISH"
+
+    return "CONTINUE_WORK"
 ```
 **Why this is preferred:** It provides **Operational Stability**. It prevents a single "confused" request from burning through your entire API budget in a loop.
 
