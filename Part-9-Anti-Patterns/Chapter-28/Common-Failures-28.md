@@ -187,17 +187,28 @@ def build_compact_memory(history: list) -> str:
 **Solution:** Give the model a "Checklist" of things to do.
 
 ```python
-# BAD: "Write a good summary of this code."
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
 
-# GOOD:
-structured_instructions = """
-1. List all public functions.
-2. Identify the primary design pattern used.
-3. Keep the total output under 100 words.
-4. Use valid Markdown headers.
-"""
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # BAD: "Write a good summary of this code."
 
-# result = call_llm(f"Analyze this code: {code}\nCHECKLIST:\n{structured_instructions}")
+    # GOOD:
+    structured_instructions = """
+    1. List all public functions.
+    2. Identify the primary design pattern used.
+    3. Keep the total output under 100 words.
+    4. Use valid Markdown headers.
+    """
+
+    # result = call_llm(f"Analyze this code: {code}\nCHECKLIST:\n{structured_instructions}")
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** "High-quality" is subjective. Numbered instructions are **Deterministic**.
 

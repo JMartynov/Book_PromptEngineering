@@ -69,6 +69,8 @@ class TeamState(TypedDict):
 **Solution:** Break the agent's logic into small, independent "Node Functions" that can be tested in isolation.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def research_node(state: TeamState) -> Dict:
     """Developer A focuses only on the research logic."""
     # ... complex scraping/retrieval logic ...

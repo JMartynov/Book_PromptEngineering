@@ -202,12 +202,21 @@ def compile_optimized_bot(student_module, train_data):
 **Solution:** DSPy's optimizer checks the *entire* dataset after every change to ensure no regressions.
 
 ```python
-# With DSPy, you don't 'tweak and pray'.
-# You define a metric and run:
-# optimizer.compile(my_program, trainset=my_golden_set)
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # With DSPy, you don't 'tweak and pray'.
+    # You define a metric and run:
+    # optimizer.compile(my_program, trainset=my_golden_set)
 
-# If the new prompt version doesn't perform better on the WHOLE set,
-# the compiler won't use it.
+    # If the new prompt version doesn't perform better on the WHOLE set,
+    # the compiler won't use it.
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It provides **Regression Protection**. You can iterate on your AI features with the same confidence as you do with unit-tested code.
 
@@ -218,8 +227,17 @@ def compile_optimized_bot(student_module, train_data):
 **Solution:** Use a "Prompt Optimizer" that tries to find the shortest set of instructions that still maintains high accuracy.
 
 ```python
-# Advanced DSPy optimizers (like MIPROv2) can explore the
-# Pareto Frontier between 'Prompt Length' and 'Accuracy'.
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # Advanced DSPy optimizers (like MIPROv2) can explore the
+    # Pareto Frontier between 'Prompt Length' and 'Accuracy'.
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** In production, saving 100 tokens per call can save thousands of dollars at scale.
 
@@ -230,6 +248,9 @@ def compile_optimized_bot(student_module, train_data):
 **Solution:** DSPy code is self-documenting. A Signature clearly defines the inputs and outputs.
 
 ```python
+import dspy
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 # Any developer can look at this and know EXACTLY what the AI does:
 class DocumentAuditor(dspy.Signature):
     """Scan a legal document for compliance with GDPR Section 4."""

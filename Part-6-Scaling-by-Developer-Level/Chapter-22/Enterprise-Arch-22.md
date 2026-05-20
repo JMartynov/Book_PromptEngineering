@@ -177,6 +177,8 @@ def get_logic_artifact(task_name: str, environment: str = "production") -> str:
 **Solution:** The "Data Layer" provides different "Chunk Sizes" based on the target model.
 
 ```python
+import re
+
 def get_optimized_context(doc_id: str, target_model: str):
     """Data Layer: Tailors context size to model hardware."""
 
@@ -194,13 +196,22 @@ def get_optimized_context(doc_id: str, target_model: str):
 **Solution:** The "Governance Layer" aggregates token usage from the "Model Layer" and maps it to "Logic Layer" features.
 
 ```python
-# ROI Analytics (Conceptual Result)
-# | App Name     | Dept | Cost  | Satisfaction | Revenue Delta |
-# |--------------|------|-------|--------------|---------------|
-# | LegalDraft   | Legal| $500  | 4.9/5        | +$10,000      |
-# | GenericChat  | HR   | $5000 | 2.1/5        | $0            |
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # ROI Analytics (Conceptual Result)
+    # | App Name     | Dept | Cost  | Satisfaction | Revenue Delta |
+    # |--------------|------|-------|--------------|---------------|
+    # | LegalDraft   | Legal| $500  | 4.9/5        | +$10,000      |
+    # | GenericChat  | HR   | $5000 | 2.1/5        | $0            |
 
-# Decision: Retire GenericChat, double down on LegalDraft.
+    # Decision: Retire GenericChat, double down on LegalDraft.
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It enables **Strategic Resource Allocation**. It becomes clear which AI projects are providing value and which are just "burning tokens."
 

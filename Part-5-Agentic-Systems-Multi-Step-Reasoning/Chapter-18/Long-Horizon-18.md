@@ -163,6 +163,8 @@ def memory_consolidation_task(redundant_rules: List[str]) -> str:
 **Solution:** At the start of a task, search the "Permanent Knowledge Base" for relevant rules and inject *only* those into the prompt.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def build_contextual_prompt(user_query: str, rules: List[str]) -> str:
     """Constructs a prompt containing only the skills relevant to the current query."""
 
@@ -186,6 +188,8 @@ def build_contextual_prompt(user_query: str, rules: List[str]) -> str:
 **Solution:** When a tool returns a 404/500, the agent updates its internal "Tool Map" to avoid that endpoint.
 
 ```python
+import re
+
 def handle_tool_execution_error(tool_name: str, error_msg: str):
     """Learns from real-world API failures to update the agent's strategy."""
 
@@ -205,6 +209,8 @@ def handle_tool_execution_error(tool_name: str, error_msg: str):
 **Solution:** Ask the model to "Review the Reviewer."
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def optimize_the_optimizer(recent_diagnoses: List[str]):
     """Self-corrects the system's learning mechanism."""
 
@@ -228,6 +234,8 @@ def optimize_the_optimizer(recent_diagnoses: List[str]):
 **Solution:** Replay a 1-week-old trajectory through the *new* agent logic and compare.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def regression_replay_test(historical_experiences: List[AgentExperience], new_prompt: str):
     """Ensures that system 'Self-Improvement' hasn't broken historical successes."""
 
@@ -249,6 +257,8 @@ def regression_replay_test(historical_experiences: List[AgentExperience], new_pr
 **Solution:** The system tracks user preferences in its memory and adapts the "Role" block accordingly.
 
 ```python
+import re
+
 def get_user_adaptive_role(user_id: str, base_role: str) -> str:
     """Modifies the agent's persona based on a specific user's history."""
 
