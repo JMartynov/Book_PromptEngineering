@@ -136,6 +136,8 @@ def shadow_deploy_test(user_query):
 **Solution:** Use a randomizer to show different prompts to different users and track their "Success Rate."
 
 ```python
+import json
+
 def metadata_consistency_test(llm_output_json):
     """Validates that model updates haven't changed the JSON schema."""
 

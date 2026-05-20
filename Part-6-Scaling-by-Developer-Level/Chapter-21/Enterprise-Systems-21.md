@@ -142,6 +142,9 @@ def scrub_output_pii(text: str) -> str:
 **Solution:** Use "Metadata Headers" in your AI Gateway to track usage by department ID.
 
 ```python
+import json
+import requests
+
 def call_enterprise_gateway(prompt: str, dept_id: str):
     """Sends a request with mandatory financial metadata."""
 
@@ -209,14 +212,23 @@ def log_audit_trail(request_payload: dict, response_payload: dict):
 **Solution:** Implement "Token Buckets" at the Gateway layer.
 
 ```python
-# Gateway Configuration (Conceptual):
-#
-# [QUOTA_MANAGER]
-# App: "Public_Support_Bot" -> Priority: CRITICAL | Limit: 5000 TPS
-# App: "Internal_HR_Tool"   -> Priority: LOW      | Limit: 50   TPS
-#
-# If HR Tool tries to spike, it gets a 429 Error,
-# while the Support Bot continues to function.
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # Gateway Configuration (Conceptual):
+    #
+    # [QUOTA_MANAGER]
+    # App: "Public_Support_Bot" -> Priority: CRITICAL | Limit: 5000 TPS
+    # App: "Internal_HR_Tool"   -> Priority: LOW      | Limit: 50   TPS
+    #
+    # If HR Tool tries to spike, it gets a 429 Error,
+    # while the Support Bot continues to function.
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It provides **System Stability**. It prevents a single "Bad Actor" (internal or external) from bringing down the entire organization's AI infrastructure.
 

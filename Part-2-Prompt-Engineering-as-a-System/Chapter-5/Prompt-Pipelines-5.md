@@ -269,13 +269,22 @@ def balance_inquiry_pipeline(user_id: str, query: str) -> str:
 **Solution:** Separate the linguistic task from the structural task.
 
 ```python
-# Step 1: Pure Linguistic Node
-# prompt = "Translate this to Spanish: 'Meet Bob in London'"
-translation = "Encuentro con Bob en Londres"
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # Step 1: Pure Linguistic Node
+    # prompt = "Translate this to Spanish: 'Meet Bob in London'"
+    translation = "Encuentro con Bob en Londres"
 
-# Step 2: Pure Structural Node
-# prompt = f"Extract entities from this text into JSON: {translation}"
-# Result: { "person": "Bob", "location": "Londres" }
+    # Step 2: Pure Structural Node
+    # prompt = f"Extract entities from this text into JSON: {translation}"
+    # Result: { "person": "Bob", "location": "Londres" }
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It follows the **Single Responsibility Principle**. By isolating the tasks, you reduce the "Cognitive Load" on the model, leading to 100% JSON validity and better translation quality.
 

@@ -73,6 +73,9 @@ class LegalModule(AIModule):
 **The Future:** Instead of instructions, you provide "Logic Snippets" in your context.
 
 ```python
+import re
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def dynamic_policy_injection(task_intent: str, vector_store: Any):
     """Retrieves current business logic from a Logic Store in real-time."""
 
@@ -97,6 +100,8 @@ def dynamic_policy_injection(task_intent: str, vector_store: Any):
 **The Future:** High-stakes decisions are never made by one model.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def swarm_consensus_voter(results: List[str]) -> str:
     """Aggregates multiple expert model outputs for mission-critical reliability."""
 
@@ -117,6 +122,8 @@ def swarm_consensus_voter(results: List[str]) -> str:
 **The Future:** Nodes that automatically trigger their own "Optimizer" if they fail.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def autonomous_agent_node(input_data: Any):
     """A node that can fix its own prompts in production."""
 
@@ -139,15 +146,24 @@ def autonomous_agent_node(input_data: Any):
 **The Future:** Prompts that combine Video, Audio, and Text as first-class citizens.
 
 ```python
-# 2027 Prompt Architecture: Cross-Modal Logic
-#
-# MISSION: "Determine if the user is being sarcastic."
-# CONTEXT_STREAM_1: <Video stream of the user's face>
-# CONTEXT_STREAM_2: <Audio stream of the user's voice>
-# CONTEXT_TEXT: "Great job, I really loved the 404 error."
-#
-# RULE: "If the facial micro-expressions (STREAM_1) contradict the text,
-# flag as HIGH_SARCASM."
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # 2027 Prompt Architecture: Cross-Modal Logic
+    #
+    # MISSION: "Determine if the user is being sarcastic."
+    # CONTEXT_STREAM_1: <Video stream of the user's face>
+    # CONTEXT_STREAM_2: <Audio stream of the user's voice>
+    # CONTEXT_TEXT: "Great job, I really loved the 404 error."
+    #
+    # RULE: "If the facial micro-expressions (STREAM_1) contradict the text,
+    # flag as HIGH_SARCASM."
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is the future:** It unlocks **Human-Level Nuance** that text-only prompts can never achieve.
 
@@ -157,14 +173,23 @@ def autonomous_agent_node(input_data: Any):
 **The Future:** Models that spend "Think Time" to search for the best internal path.
 
 ```python
-# The 'Prompt' of 2027:
-# response = client.generate(
-#    model="reasoner-v1",
-#    compute_budget_usd=0.05, # Tell the model how much to 'think'
-#    goal="Optimize this SQL query for 1TB table."
-# )
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # The 'Prompt' of 2027:
+    # response = client.generate(
+    #    model="reasoner-v1",
+    #    compute_budget_usd=0.05, # Tell the model how much to 'think'
+    #    goal="Optimize this SQL query for 1TB table."
+    # )
 
-# The model loops internally, testing paths, until the budget is spent.
+    # The model loops internally, testing paths, until the budget is spent.
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is the future:** It moves from "Fast Thinking" (Stochastic) to "Slow Thinking" (Deterministic reasoning) based on the user's budget.
 
@@ -174,12 +199,21 @@ def autonomous_agent_node(input_data: Any):
 **The Future:** A small model on the user's phone does the "Guardrailing" while a giant model in the cloud does the "Reasoning."
 
 ```python
-# Client-side (Mobile Model):
-# if is_private_data(user_input):
-#     redacted_input = local_model.redact(user_input)
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # Client-side (Mobile Model):
+    # if is_private_data(user_input):
+    #     redacted_input = local_model.redact(user_input)
 
-# Server-side (GPT-5 Cloud):
-# result = cloud_model.reason(redacted_input)
+    # Server-side (GPT-5 Cloud):
+    # result = cloud_model.reason(redacted_input)
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is the future:** It optimizes for **Privacy and Latency**. Sensitive data never leaves the device unless it's been scrubbed by a local AI.
 

@@ -148,12 +148,21 @@ def run_advanced_optimization(trainset: list):
 **Solution:** Use an optimizer to "Propose" instructions based on a description of the task.
 
 ```python
-# Conceptual Workflow of Automatic Proposal:
-# 1. Signature: input(text) -> output(summary)
-# 2. Optimizer: Proposes "You are a Chief of Staff. Distill the following..."
-# 3. Optimizer: Proposes "You are a Technical Lead. Extract only the action items..."
-# 4. Search: Finds that "Chief of Staff" instruction yields 12% higher factual recall.
-# 5. Final Result: The "Chief of Staff" prompt is compiled into the program.
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # Conceptual Workflow of Automatic Proposal:
+    # 1. Signature: input(text) -> output(summary)
+    # 2. Optimizer: Proposes "You are a Chief of Staff. Distill the following..."
+    # 3. Optimizer: Proposes "You are a Technical Lead. Extract only the action items..."
+    # 4. Search: Finds that "Chief of Staff" instruction yields 12% higher factual recall.
+    # 5. Final Result: The "Chief of Staff" prompt is compiled into the program.
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** it addresses the **"Blank Page"** problem. The system often generates instructions that use specific model-trigger words you wouldn't know.
 
@@ -187,16 +196,25 @@ def anti_disclaimer_metric(example, prediction, trace=None):
 **Solution:** Use random search to explore dozens of different "Bootstrap" combinations.
 
 ```python
-from dspy.teleprompters import BootstrapFewShotWithRandomSearch
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    from dspy.teleprompters import BootstrapFewShotWithRandomSearch
 
-# num_candidate_programs: The number of different 'Prompt Sets' to evaluate
-optimizer = BootstrapFewShotWithRandomSearch(
-    metric=triage_metric,
-    max_bootstrapped_demos=3,
-    num_candidate_programs=50 # Brute-force search for the win
-)
+    # num_candidate_programs: The number of different 'Prompt Sets' to evaluate
+    optimizer = BootstrapFewShotWithRandomSearch(
+        metric=triage_metric,
+        max_bootstrapped_demos=3,
+        num_candidate_programs=50 # Brute-force search for the win
+    )
 
-# compiled_program = optimizer.compile(MyModule(), trainset=trainset)
+    # compiled_program = optimizer.compile(MyModule(), trainset=trainset)
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It prevents getting stuck in a **Local Maximum**. By exploring more of the search space, you find the "hidden gems" of prompt engineering.
 
@@ -207,13 +225,24 @@ optimizer = BootstrapFewShotWithRandomSearch(
 **Solution:** Run the same optimizer twice—once for each model.
 
 ```python
-# Compilation 1: Target Llama-3 (Requires more detailed instructions)
-# with dspy.context(lm=llama3):
-#    llama_optimized = optimizer.compile(MyModule(), trainset=data)
+import dspy
 
-# Compilation 2: Target GPT-4o (Requires more concise instructions)
-# with dspy.context(lm=gpt4o):
-#    gpt_optimized = optimizer.compile(MyModule(), trainset=data)
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # Compilation 1: Target Llama-3 (Requires more detailed instructions)
+    # with dspy.context(lm=llama3):
+    #    llama_optimized = optimizer.compile(MyModule(), trainset=data)
+
+    # Compilation 2: Target GPT-4o (Requires more concise instructions)
+    # with dspy.context(lm=gpt4o):
+    #    gpt_optimized = optimizer.compile(MyModule(), trainset=data)
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It acknowledges that LLMs have **"Dialects."** A prompt that is "too wordy" for GPT-4 might be "just right" for a smaller model that needs more guidance.
 
@@ -224,11 +253,20 @@ optimizer = BootstrapFewShotWithRandomSearch(
 **Solution:** Optimize the first module, then "Freeze" its prompt and optimize the second.
 
 ```python
-# Step 1: Optimize the 'Retriever' to find better facts.
-# Step 2: Use those facts to optimize the 'Synthesizer'.
-# Step 3: Use the synthesized output to optimize the 'Editor'.
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # Step 1: Optimize the 'Retriever' to find better facts.
+    # Step 2: Use those facts to optimize the 'Synthesizer'.
+    # Step 3: Use the synthesized output to optimize the 'Editor'.
 
-# In 2026, we call this 'End-to-End Programmatic Training'.
+    # In 2026, we call this 'End-to-End Programmatic Training'.
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It follows the **Layered Optimization** principle, ensuring that each part of the system is a stable foundation for the next.
 

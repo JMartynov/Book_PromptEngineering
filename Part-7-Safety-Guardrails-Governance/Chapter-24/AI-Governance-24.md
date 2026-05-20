@@ -156,6 +156,8 @@ class RegulatedDecision(BaseModel):
 **Solution:** Periodically run a "Parity Test" against your system's outputs.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def check_for_demographic_parity(results_list: List[dict]):
     """Analyzes output distribution for statistical bias."""
 

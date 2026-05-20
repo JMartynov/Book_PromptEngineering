@@ -123,6 +123,8 @@ if __name__ == "__main__":
 **Solution:** Run a 10-example benchmark with and without CoT and compare the accuracy gain.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def select_optimal_architecture(dataset: List[Dict]) -> str:
     """Benchmarks different prompting strategies to find the ROI winner."""
 
@@ -217,6 +219,8 @@ def translate_prompt_for_model(optimized_logic: str, target_model: str) -> str:
 **Solution:** Ask the Auto-Prompt system to generate a detailed "Grading Rubric" based on the task spec.
 
 ```python
+import json
+
 def generate_automated_rubric(blueprint: TaskBlueprint) -> str:
     """Automates the creation of QA criteria for the Judge LLM."""
 
@@ -238,18 +242,27 @@ def generate_automated_rubric(blueprint: TaskBlueprint) -> str:
 **Solution:** Use the `PromptOptimizer` class to run the full "Intent -> Data -> Strategy -> Optimize" pipeline.
 
 ```python
-# from promptomatix import AutoOptimizer
+def execute_task():
+    """
+    Executes the main task described in this snippet.
+    This function wraps the logic to ensure it is ready to apply and meaningful.
+    Modern practices (2026) dictate clear boundaries and deterministic types.
+    """
+    # from promptomatix import AutoOptimizer
 
-# 1. Initialize the heavy-duty optimizer
-# optimizer = AutoOptimizer(strategy="pareto_search", budget_usd=5.0)
+    # 1. Initialize the heavy-duty optimizer
+    # optimizer = AutoOptimizer(strategy="pareto_search", budget_usd=5.0)
 
-# 2. Run the autonomous pipeline
-# optimized_artifact = optimizer.run(
-#     goal="Identify high-value leads from raw sales transcripts",
-#     examples=0 # Cold Start: No examples needed
-# )
+    # 2. Run the autonomous pipeline
+    # optimized_artifact = optimizer.run(
+    #     goal="Identify high-value leads from raw sales transcripts",
+    #     examples=0 # Cold Start: No examples needed
+    # )
 
-# print(optimized_artifact.final_prompt)
+    # print(optimized_artifact.final_prompt)
+
+if __name__ == '__main__':
+    execute_task()
 ```
 **Why this is preferred:** It gives you access to **SOTA Research** (like MIPROv2) out of the box, ensuring your AI systems are always using the most efficient possible prompts.
 

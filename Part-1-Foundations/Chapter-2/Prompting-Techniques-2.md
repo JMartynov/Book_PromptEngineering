@@ -162,6 +162,8 @@ if __name__ == "__main__":
 **Solution:** Chain two prompts—one to extract a structured outline, and a second to write the post section-by-section.
 
 ```python
+from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+
 def pipeline_stage_1_outline(transcript: str) -> List[str]:
     """Stage 1: Structural Extraction."""
     # prompt = f"Extract a 3-point outline from: {transcript}"
@@ -322,6 +324,8 @@ def tot_strategy_selector(goal: str):
 **Solution:** Append a "Reasoning Trigger" to the end of your prompt.
 
 ```python
+import re
+
 def fast_accuracy_boost(query: str):
     """
     Lowest effort, highest ROI technique.
