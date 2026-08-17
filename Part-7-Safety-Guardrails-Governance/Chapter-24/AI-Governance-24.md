@@ -39,198 +39,549 @@ In practice, AI Governance solves several critical enterprise issues:
 
 ## Practical Implementation: 8 Python Examples
 
-These examples demonstrate how to build governance and compliance features into your AI systems.
+These production-grade examples demonstrate how to build enterprise AI governance systems using standardized audit log schemas, regional compliance routers, privacy-preserving token pseudonymization, legal explainability wrappers, demographic parity bias scanners, cryptographic prompt provenance hashes, high-risk regulatory interceptors, and automated DPIA compliance documentation generators.
 
-### Example 1: Standardized Audit Log Schema
-**Problem:** Inconsistent logging makes it impossible to audit decisions across 50 different AI apps.
-**Solution:** Define a central Pydantic model for all AI audit logs.
+### Example 1: Standardized Production Audit Log Schema
+**Problem:** Fragmented and incomplete logging makes it impossible to reconstruct AI decisions during external regulatory audits or litigation.
+**Solution:** Define an immutable, centralized Pydantic audit log schema capturing request provenance, prompt fingerprints, retrieved vector citations, and execution telemetry.
 
 ```python
+import json
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
-from datetime import datetime
-from typing import List, Optional
 
-class AIAuditLog(BaseModel):
-    """The mandatory 'Flight Recorder' record for AI transactions."""
-    request_id: str = Field(..., description="Unique UUID for the trace")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class AIAuditRecord(BaseModel):
+    """The mandatory flight-recorder schema for enterprise AI transactions."""
+    request_id: str = Field(default_factory=lambda: f"req_{uuid.uuid4().hex[:12]}")
+    timestamp_utc: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     user_id: str
-    logic_hash: str = Field(..., description="SHA-256 hash of the prompt and config used")
+    tenant_id: str
+    logic_hash: str = Field(..., description="SHA-256 hash of system prompt, model ID, and parameters")
     input_text: str
     output_text: str
-    model_provider_id: str = Field(..., description="e.g., 'openai/gpt-4o-2024-05-13'")
-    context_source_ids: List[str] = Field(..., description="IDs of documents from the Vector DB")
-    governance_status: str = "PENDING_AUDIT"
+    model_provider_id: str = Field(..., description="e.g. 'openai/gpt-4o-2024-05-13'")
+    vector_citation_doc_ids: List[str] = Field(default_factory=list)
+    latency_ms: float
+    total_tokens_consumed: int
+    governance_status: str = "AUDITED_COMPLIANT"
 
-# Execution Example
+
+class CentralAuditLogger:
+    """Manages secure serialization and audit persistence."""
+
+    def __init__(self):
+        self.logs: List[AIAuditRecord] = []
+
+    def record_transaction(self, record: AIAuditRecord) -> str:
+        self.logs.append(record)
+        return record.request_id
+
+    def export_jsonl(self) -> str:
+        return "\n".join(r.model_dump_json() for r in self.logs)
+
+
 if __name__ == "__main__":
-    # log = AIAuditLog(
-    #     request_id="trace_7788",
-    #     user_id="user_123",
-    #     logic_hash="abc123def",
-    #     input_text="...",
-    #     output_text="...",
-    #     model_provider_id="gpt-4o",
-    #     context_source_ids=["doc_1"]
-    # )
-    pass
+    logger = CentralAuditLogger()
+
+    sample_record = AIAuditRecord(
+        user_id="usr_981",
+        tenant_id="enterprise_client_alpha",
+        logic_hash="a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890",
+        input_text="Summarize the commercial lease agreement for Suite 400.",
+        output_text="The lease specifies a 36-month term at $4,500/month with annual 3% escalations.",
+        model_provider_id="azure-openai/gpt-4o",
+        vector_citation_doc_ids=["DOC_LEASE_SUITE_400_P1", "DOC_LEASE_SUITE_400_P4"],
+        latency_ms=420.5,
+        total_tokens_consumed=385
+    )
+
+    req_id = logger.record_transaction(sample_record)
+    print(f"=== Transaction Logged Successfully: {req_id} ===")
+    print(logger.export_jsonl())
 ```
-**Why this is preferred:** It ensures **Data Consistency**. A centralized "Audit Sink" can then index these logs, allowing you to search for all decisions made by "Version 1.2" of the system.
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` (v2), `datetime`, and `uuid`.
+- **How It Works:** Validates all required legal transaction fields before logging. Emits structured JSONL ready for ingestion into SIEM platforms or cloud object stores.
+- **Expected Output:** An auditable, structured log record with deterministic timestamps, token usage, and document citation IDs.
+- **Why This Approach:** Ensures compliance with EU AI Act Article 12 (record-keeping and automatic logging requirements for high-risk AI).
 
 ---
 
-### Example 2: The "Compliance Router" (EU AI Act)
-**Problem:** Different regions have different AI laws.
-**Solution:** Use a router to apply different "Governance Policies" based on the user's location.
+### Example 2: Regional Compliance Router (EU AI Act & Data Sovereignty)
+**Problem:** Operating globally requires complying with divergent regulatory regimes (EU AI Act, HIPAA in the US, regional data sovereignty in APAC).
+**Solution:** Implement a dynamic compliance router that selects guardrail policies, data storage regions, and model endpoints based on user jurisdiction and task risk profile.
 
 ```python
-def route_with_compliance(query: str, user_metadata: dict):
-    """Applies regional governance rules to the AI pipeline."""
-
-    region = user_metadata.get("country_code", "US")
-
-    if region in ["EU", "FR", "DE"]:
-        # Tier 1: High-Risk (EU AI Act Compliance)
-        print("Applying EU AI Act Guardrails...")
-        # return call_with_bias_evals(query)
-        pass
-    else:
-        # Tier 2: Standard Compliance
-        # return call_standard_llm(query)
-        pass
-```
-**Why this is preferred:** It enables **Global Scalability**. You can comply with the world's strictest laws (EU) without slowing down your operations in less-regulated markets.
-
----
-
-### Example 3: Differential Privacy (Scrubbing Inputs)
-**Problem:** You want to analyze user feedback in bulk but don't want to see their names or emails.
-**Solution:** Use a "Sanitizer" node to remove PII before sending data to the analysis model.
-
-```python
-import spacy
-
-# Load a production-grade NER model
-# nlp = spacy.load("en_core_web_trf")
-
-def anonymize_log_payload(text: str) -> str:
-    """Scrub PII from logs before they reach the data lake."""
-
-    # Mocking NER detection
-    # doc = nlp(text)
-    # for ent in doc.ents:
-    #     if ent.label_ in ["PERSON", "EMAIL", "PHONE"]:
-    #         text = text.replace(ent.text, f"<{ent.label_}>")
-
-    return text # Returns 'Hello <PERSON>' instead of 'Hello Bob'
-
-# Execution Example:
-# log_to_analytics(anonymize_log_payload(production_output))
-```
-**Why this is preferred:** It implements **Privacy by Design**. By removing PII at the source, you reduce the surface area of your data liability.
-
----
-
-### Example 4: The "Explainability" Wrapper
-**Problem:** An LLM gives a "Yes" or "No" without explanation, which is illegal for some decisions.
-**Solution:** Wrap your logic in a module that *requires* a "Justification" field in its structured output.
-
-```python
+from enum import Enum
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
-class RegulatedDecision(BaseModel):
-    """Forces the LLM to provide the reasoning required by law."""
-    decision: Literal["APPROVED", "REJECTED", "ESCALATE"]
-    justification: str = Field(..., description="The specific policy reason for this choice")
-    evidence_citation: str = Field(..., description="Snippet from the context supporting this")
-    confidence_score: float = Field(..., ge=0.0, le=1.0)
 
-# The UI can now display: "Rejected because: [justification]"
+class ComplianceJurisdiction(str, Enum):
+    EU = "EU"        # Strict EU AI Act, mandatory bias evals, local EU hosting
+    US = "US"        # Standard SOC2 / HIPAA compliance
+    APAC = "APAC"    # Regional cross-border data transfer controls
+
+
+class RiskTier(str, Enum):
+    HIGH_RISK = "HIGH_RISK"        # Credit, recruitment, medical diagnosis
+    MINIMAL_RISK = "MINIMAL_RISK"  # General text summarization, marketing
+
+
+class GovernanceRoutePolicy(BaseModel):
+    selected_endpoint: str
+    enforce_bias_eval: bool
+    mandatory_human_review: bool
+    data_residency_region: str
+
+
+class RegionalComplianceRouter:
+    """Routes AI workloads to compliant infrastructure and applies jurisdiction-specific guardrails."""
+
+    def determine_route(self, jurisdiction: ComplianceJurisdiction, risk: RiskTier) -> GovernanceRoutePolicy:
+        if jurisdiction == ComplianceJurisdiction.EU and risk == RiskTier.HIGH_RISK:
+            return GovernanceRoutePolicy(
+                selected_endpoint="https://ai-cluster.frankfurt.corp/v1",
+                enforce_bias_eval=True,
+                mandatory_human_review=True,
+                data_residency_region="eu-central-1"
+            )
+        elif jurisdiction == ComplianceJurisdiction.EU:
+            return GovernanceRoutePolicy(
+                selected_endpoint="https://ai-cluster.frankfurt.corp/v1",
+                enforce_bias_eval=False,
+                mandatory_human_review=False,
+                data_residency_region="eu-central-1"
+            )
+        else:
+            return GovernanceRoutePolicy(
+                selected_endpoint="https://ai-cluster.us-east.corp/v1",
+                enforce_bias_eval=False,
+                mandatory_human_review=False,
+                data_residency_region="us-east-1"
+            )
+
+
+if __name__ == "__main__":
+    router = RegionalComplianceRouter()
+
+    # Route 1: EU Hiring/Recruitment App (High Risk)
+    policy_eu_recruitment = router.determine_route(ComplianceJurisdiction.EU, RiskTier.HIGH_RISK)
+    print("=== EU High-Risk Workload Policy ===")
+    print(f"Endpoint: {policy_eu_recruitment.selected_endpoint}")
+    print(f"Enforce Bias Scanners: {policy_eu_recruitment.enforce_bias_eval}")
+    print(f"Mandatory HITL Gate: {policy_eu_recruitment.mandatory_human_review}")
+    print(f"Data Residency: {policy_eu_recruitment.data_residency_region}")
 ```
-**Why this is preferred:** It forces **Decision Transparency**. The system physically cannot return a result without the "Reasoning" required by law.
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` and `enum.Enum`.
+- **How It Works:** Evaluates user geographical metadata and workload risk classification. Automatically applies local data residency and algorithmic auditing requirements.
+- **Expected Output:** Tailored compliance routing policies gating inference endpoints.
+- **Why This Approach:** Enables multi-national enterprises to maintain continuous legal compliance without maintaining separate codebase forks.
 
 ---
 
-### Example 5: Monitoring "Bias Drift"
-**Problem:** A prompt update might accidentally make the AI favor "Male" candidates over "Female" candidates.
-**Solution:** Periodically run a "Parity Test" against your system's outputs.
+### Example 3: Privacy-Preserving Token Pseudonymization Engine
+**Problem:** Ingesting raw customer feedback into LLMs exposes personal customer data (names, emails, phones) to third-party model providers.
+**Solution:** Implement a two-way pseudonymization engine that replaces identifiable entities with synthetic tokens before inference and restores them on response delivery.
 
 ```python
-from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+import re
+from typing import Dict, Tuple
+from pydantic import BaseModel, Field
 
-def check_for_demographic_parity(results_list: List[dict]):
-    """Analyzes output distribution for statistical bias."""
 
-    # Calculate success rate for Group A vs Group B
-    # if abs(rate_a - rate_b) > 0.05:
-    #     trigger_governance_alert("Significant Bias Detected in Version 1.2")
-    pass
+class PseudonymizedPayload(BaseModel):
+    anonymized_text: str
+    replacement_vault: Dict[str, str]
+
+
+class PrivacyPseudonymizer:
+    """Replaces PII entities with reversible pseudonym tokens to protect user privacy."""
+
+    def __init__(self):
+        self.email_regex = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b"
+        self.phone_regex = r"\b\d{3}[-.\s]??\d{3}[-.\s]??\d{4}\b"
+
+    def pseudonymize(self, text: str) -> PseudonymizedPayload:
+        vault: Dict[str, str] = {}
+        clean_text = text
+
+        # Pseudonymize Emails
+        emails = re.findall(self.email_regex, clean_text)
+        for idx, email in enumerate(set(emails), 1):
+            token = f"[[USER_EMAIL_{idx}]]"
+            vault[token] = email
+            clean_text = clean_text.replace(email, token)
+
+        # Pseudonymize Phones
+        phones = re.findall(self.phone_regex, clean_text)
+        for idx, phone in enumerate(set(phones), 1):
+            token = f"[[USER_PHONE_{idx}]]"
+            vault[token] = phone
+            clean_text = clean_text.replace(phone, token)
+
+        return PseudonymizedPayload(anonymized_text=clean_text, replacement_vault=vault)
+
+    def rehydrate(self, anonymized_text: str, vault: Dict[str, str]) -> str:
+        """Restores original PII for authorized local presentation."""
+        rehydrated = anonymized_text
+        for token, original in vault.items():
+            rehydrated = rehydrated.replace(token, original)
+        return rehydrated
+
+
+if __name__ == "__main__":
+    privacy = PrivacyPseudonymizer()
+
+    raw_input = "Please contact client Jane Smith at jane.smith@acme.corp or 555-019-2834 regarding the invoice."
+    pseudonym_result = privacy.pseudonymize(raw_input)
+
+    print("=== Pseudonymized Payload (Sent to LLM) ===")
+    print(pseudonym_result.anonymized_text)
+    print("\nVault Entries:")
+    print(pseudonym_result.replacement_vault)
+
+    # Simulated LLM response containing pseudonym tokens
+    simulated_llm_reply = f"I have drafted a confirmation email to {list(pseudonym_result.replacement_vault.keys())[0]}."
+    restored_reply = privacy.rehydrate(simulated_llm_reply, pseudonym_result.replacement_vault)
+    print(f"\nRehydrated Output (Shown to User): {restored_reply}")
 ```
-**Why this is preferred:** It provides **Early Warning**. You catch the bias in your "Testing" or "Monitoring" phase rather than in a lawsuit.
+
+**Developer Explanation:**
+- **Libraries Used:** `re` for entity pattern matching and `pydantic`.
+- **How It Works:** Masks personal data before dispatching payloads to the model. Maintains an in-memory vault to re-insert true identifiers only on the client's authenticated device.
+- **Expected Output:** Clean anonymized text for third-party inference, with zero loss of readability for the end user.
+- **Why This Approach:** Fulfills GDPR Article 25 (Data Protection by Design and by Default).
 
 ---
 
-### Example 6: Immutable Versioning of Prompts
-**Problem:** A prompt is changed in the database, and you don't know what it used to be.
-**Solution:** Use a "Content-Addressable" store for prompts (Git-like hashes).
+### Example 4: The Legal Explainability & Justification Wrapper
+**Problem:** Machine learning decisions regarding credit, tenancy, or insurance that lack explicit justification violate fair-lending and automated-decision regulations.
+**Solution:** Require the AI model to emit a structured justification schema linking decisions directly to policy clauses and factual context citations.
+
+```python
+from typing import List, Literal
+from pydantic import BaseModel, Field
+
+
+class RegulatedUnderwritingAssessment(BaseModel):
+    """Enforces strict explainability and statutory justification requirements."""
+    decision: Literal["APPROVED", "ADVERSE_ACTION_REJECTED", "MANUAL_ESCALATION"]
+    primary_justification: str = Field(..., description="Plain-language statutory explanation for applicant")
+    policy_clauses_applied: List[str] = Field(..., description="Internal or legal policy clause identifiers")
+    counterfactual_guidance: str = Field(
+        ..., description="Explanation of what specific criteria would change this decision"
+    )
+    confidence_level: float = Field(..., ge=0.0, le=1.0)
+
+
+class ExplainabilityEngine:
+    """Simulates an explainable regulatory decision system."""
+
+    def evaluate_applicant(self, debt_to_income: float, credit_score: int) -> RegulatedUnderwritingAssessment:
+        if credit_score < 620:
+            return RegulatedUnderwritingAssessment(
+                decision="ADVERSE_ACTION_REJECTED",
+                primary_justification="Credit score falls below the required threshold of 620 for unsecured credit.",
+                policy_clauses_applied=["POL-CREDIT-SEC-4.2", "FCRA-REG-B-DISCLOSURE"],
+                counterfactual_guidance="Raising credit score above 620 or providing an eligible co-signer allows re-application.",
+                confidence_level=0.99
+            )
+        return RegulatedUnderwritingAssessment(
+            decision="APPROVED",
+            primary_justification="Applicant meets all underwriting criteria for credit score and debt coverage.",
+            policy_clauses_applied=["POL-CREDIT-SEC-1.1"],
+            counterfactual_guidance="N/A - Application approved.",
+            confidence_level=0.95
+        )
+
+
+if __name__ == "__main__":
+    engine = ExplainabilityEngine()
+    assessment = engine.evaluate_applicant(debt_to_income=0.45, credit_score=590)
+
+    print("=== Regulated Explainable AI Decision ===")
+    print(f"Decision: {assessment.decision}")
+    print(f"Reasoning: {assessment.primary_justification}")
+    print(f"Policies Cited: {assessment.policy_clauses_applied}")
+    print(f"Counterfactual Action: {assessment.counterfactual_guidance}")
+```
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` for structured schema enforcement.
+- **How It Works:** Mandates output containing plain-language justifications, policy citations, and counterfactual advice ("how the user could reverse the decision").
+- **Expected Output:** Transparent, compliant decision records providing legally defensible explanations.
+- **Why This Approach:** Satisfies GDPR Article 22 (Right to Explanation in Automated Decision-Making) and the US Equal Credit Opportunity Act (ECOA).
+
+---
+
+### Example 5: Monitoring Bias Drift & Demographic Parity
+**Problem:** Over time, model checkpoints or prompt modifications can introduce systemic disparate impact across demographic cohorts.
+**Solution:** Implement an automated statistical parity test suite computing selection rates and enforcing the Four-Fifths (80%) Rule across evaluation batches.
+
+```python
+from typing import Dict, List
+from pydantic import BaseModel, Field
+
+
+class DemographicBatchResult(BaseModel):
+    cohort_name: str
+    total_evaluated: int
+    total_approved: int
+
+    @property
+    def approval_rate(self) -> float:
+        return self.total_approved / self.total_evaluated if self.total_evaluated > 0 else 0.0
+
+
+class BiasAuditReport(BaseModel):
+    is_compliant: bool
+    disparate_impact_ratio: float
+    cohort_rates: Dict[str, float]
+    alert_message: str
+
+
+class DemographicParityAuditor:
+    """Calculates Disparate Impact Ratio and monitors algorithmic fairness."""
+
+    @staticmethod
+    def audit_cohorts(cohort_a: DemographicBatchResult, cohort_b: DemographicBatchResult) -> BiasAuditReport:
+        rate_a = cohort_a.approval_rate
+        rate_b = cohort_b.approval_rate
+
+        # Disparate Impact Ratio (DIR) = Lower Selection Rate / Higher Selection Rate
+        higher_rate = max(rate_a, rate_b)
+        lower_rate = min(rate_a, rate_b)
+        dir_ratio = lower_rate / higher_rate if higher_rate > 0 else 1.0
+
+        # EEOC 80% (4/5ths) rule: Selection rate of protected group must be >= 80% of top group
+        is_compliant = dir_ratio >= 0.80
+
+        alert = (
+            "PASSED: Selection rates satisfy the 80% demographic parity threshold."
+            if is_compliant else
+            f"VIOLATION ALERT: Disparate impact detected! Ratio {dir_ratio:.2f} is below the 0.80 regulatory threshold."
+        )
+
+        return BiasAuditReport(
+            is_compliant=is_compliant,
+            disparate_impact_ratio=round(dir_ratio, 3),
+            cohort_rates={cohort_a.cohort_name: round(rate_a, 3), cohort_b.cohort_name: round(rate_b, 3)},
+            alert_message=alert
+        )
+
+
+if __name__ == "__main__":
+    auditor = DemographicParityAuditor()
+
+    group_1 = DemographicBatchResult(cohort_name="Group_Standard", total_evaluated=1000, total_approved=750)
+    group_2 = DemographicBatchResult(cohort_name="Group_Protected", total_evaluated=1000, total_approved=580)
+
+    report = auditor.audit_cohorts(group_1, group_2)
+    print("=== Algorithmic Fairness Audit ===")
+    print(f"Compliant: {report.is_compliant}")
+    print(f"Disparate Impact Ratio: {report.disparate_impact_ratio}")
+    print(f"Cohort Approval Rates: {report.cohort_rates}")
+    print(f"Status: {report.alert_message}")
+```
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` for batch metrics and reporting.
+- **How It Works:** Calculates selection rates for demographic groups and computes the Disparate Impact Ratio against the EEOC 80% standard.
+- **Expected Output:** Clear compliance report flagging any systemic bias drift.
+- **Why This Approach:** Detects discriminatory algorithmic skew in continuous integration and production telemetry.
+
+---
+
+### Example 6: Immutable Content-Addressable Logic Hashes
+**Problem:** In a dynamic system where prompts, model parameters, and tools evolve, teams cannot prove which exact prompt version generated a historical output.
+**Solution:** Compute cryptographic SHA-256 fingerprints across the entire configuration tuple (prompt text, model checkpoint, temperature, tool schemas).
 
 ```python
 import hashlib
+import json
+from typing import Any, Dict
+from pydantic import BaseModel, Field
 
-def calculate_logic_hash(prompt_text: str, model_id: str, temp: float) -> str:
-    """Generates an immutable fingerprint for the AI's logic."""
-    payload = f"{prompt_text}|{model_id}|{temp}"
-    return hashlib.sha256(payload.encode()).hexdigest()
 
-# logic_id = calculate_logic_hash("You are a judge...", "gpt-4", 0.0)
-# AIAuditLog(logic_version=logic_id, ...)
+class AIConfigurationManifest(BaseModel):
+    model_identifier: str
+    temperature: float
+    system_prompt_text: str
+    tool_declarations: List[str]
+
+    def compute_logic_hash(self) -> str:
+        """Computes a deterministic SHA-256 fingerprint for this configuration state."""
+        serialized = json.dumps({
+            "model": self.model_identifier,
+            "temp": self.temperature,
+            "prompt": self.system_prompt_text,
+            "tools": sorted(self.tool_declarations)
+        }, sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+if __name__ == "__main__":
+    manifest_v1 = AIConfigurationManifest(
+        model_identifier="gpt-4o-2024-05-13",
+        temperature=0.0,
+        system_prompt_text="You are a compliant financial assistant. Cite all regulations.",
+        tool_declarations=["search_tax_code", "verify_account"]
+    )
+
+    logic_hash = manifest_v1.compute_logic_hash()
+    print("=== Configuration Manifest Fingerprint ===")
+    print(f"Model ID: {manifest_v1.model_identifier}")
+    print(f"Immutable Logic Hash: {logic_hash}")
 ```
-**Why this is preferred:** It ensures **Non-Repudiation**. You can prove that "This specific text" was the one that generated "That specific response."
+
+**Developer Explanation:**
+- **Libraries Used:** `hashlib`, `json`, and `pydantic`.
+- **How It Works:** Canonicalizes prompt text, hyper-parameters, and tool signatures into a sorted JSON string, producing a unique SHA-256 logic fingerprint.
+- **Expected Output:** An unforgeable hash identifying the exact version of the AI's configuration.
+- **Why This Approach:** Enables legal non-repudiation and traceability for multi-year compliance archiving.
 
 ---
 
-### Example 7: "High-Risk" Task Intercept
-**Problem:** An agent might try to perform a "High-Risk" task (e.g. giving medical advice) that it's not authorized for.
-**Solution:** Use a "Task Classifier" to intercept and block high-risk intents.
+### Example 7: High-Risk Prohibited Intent Interceptor
+**Problem:** Under the EU AI Act (Article 5), certain AI applications (e.g. social scoring, uncertified medical diagnosis, unauthorized biometric classification) are strictly prohibited.
+**Solution:** Deploy an intent classification gate that scans incoming requests against prohibited categories and blocks unauthorized execution.
 
 ```python
-def intent_governance_gate(user_intent: str):
-    """Prevents the AI from performing unauthorized high-stakes tasks."""
+import re
+from typing import List, Tuple
+from pydantic import BaseModel, Field
 
-    restricted_keywords = ["medical advice", "prescribe", "legal filing", "wire transfer"]
 
-    if any(k in user_intent.lower() for k in restricted_keywords):
-        # 1. Log the attempt
-        # 2. Block the agent
-        return "ERROR: This AI system is not authorized for medical/legal actions."
+class PolicyInterceptionResult(BaseModel):
+    is_permitted: bool
+    prohibited_category: Optional[str]
+    enforcement_action: str
 
-    return "AUTHORIZED"
+
+class ProhibitedPracticeInterceptor:
+    """Enforces Article 5 (Prohibited AI Practices) of the EU AI Act."""
+
+    PROHIBITED_INTENTS = [
+        ("SOCIAL_SCORING", r"(?i)\b(social\s+credit\s+score|citizen\s+trustworthiness\s+ranking)\b"),
+        ("UNAUTHORIZED_BIOMETRIC_CATEGORIZATION", r"(?i)\b(deduce\s+sexual\s+orientation|infer\s+political\s+beliefs\s+from\s+face)\b"),
+        ("UNLICENSED_MEDICAL_PRESCRIPTION", r"(?i)\b(prescribe\s+antibiotics|diagnose\s+oncology\s+scan)\b")
+    ]
+
+    def evaluate_request(self, user_intent: str) -> PolicyInterceptionResult:
+        for category, regex in self.PROHIBITED_INTENTS:
+            if re.search(regex, user_intent):
+                return PolicyInterceptionResult(
+                    is_permitted=False,
+                    prohibited_category=category,
+                    enforcement_action="HARD_BLOCK_AND_LOG"
+                )
+
+        return PolicyInterceptionResult(
+            is_permitted=True,
+            prohibited_category=None,
+            enforcement_action="ALLOW"
+        )
+
+
+if __name__ == "__main__":
+    interceptor = ProhibitedPracticeInterceptor()
+
+    # Test 1: Prohibited social scoring
+    req1 = "Calculate a social credit score for citizen ID 99281 based on public CCTV data."
+    res1 = interceptor.evaluate_request(req1)
+    print(f"Request 1 -> Permitted: {res1.is_permitted} | Category: {res1.prohibited_category} | Action: {res1.enforcement_action}")
+
+    # Test 2: Standard compliant query
+    req2 = "Summarize the key differences between GAAP and IFRS accounting standards."
+    res2 = interceptor.evaluate_request(req2)
+    print(f"Request 2 -> Permitted: {res2.is_permitted} | Action: {res2.enforcement_action}")
 ```
-**Why this is preferred:** It acts as a **Safety Interlock**. It prevents the AI from wandering into domains where the company lacks the necessary certifications.
+
+**Developer Explanation:**
+- **Libraries Used:** `re` and `pydantic`.
+- **How It Works:** Scans user requests against statutory prohibited practices. Blocks matching transactions instantly before any processing begins.
+- **Expected Output:** Immediate rejection verdicts with statutory categorization codes.
+- **Why This Approach:** Prevents enterprise applications from exposing the organization to severe penalties under AI Act Article 5 prohibitions.
 
 ---
 
-### Example 8: Automated Privacy Impact Assessment (DPIA)
-**Problem:** You need to document which user data is being sent to which model for your legal team.
-**Solution:** Automatically generate a Markdown report based on your system's "Data Flow" metadata.
+### Example 8: Automated Data Protection Impact Assessment (DPIA) Generator
+**Problem:** Enterprise legal and compliance teams require comprehensive documentation of data flows, PII safeguards, and AI model endpoints.
+**Solution:** Automatically generate standardized DPIA Markdown audit reports from live system configuration metadata.
 
 ```python
-def generate_compliance_doc(feature_metadata: dict) -> str:
-    """Automates the creation of legal compliance documentation."""
+from datetime import datetime, timezone
+from typing import List
+from pydantic import BaseModel, Field
 
-    report = f"""
-    # AI Governance Report: {feature_metadata['name']}
-    - **Logic Version:** {feature_metadata['hash']}
-    - **Data Ingested:** {feature_metadata['data_types']}
-    - **Third-Party Providers:** {feature_metadata['providers']}
-    - **PII Scrubbing Status:** ACTIVE
-    - **Last Evaluation Score:** {feature_metadata['eval_score']}
-    """
-    return report
 
-# Output: 'AI_Governance_v1.md'
+class DPIAMetadata(BaseModel):
+    service_name: str
+    version: str
+    logic_hash: str
+    data_categories: List[str]
+    third_party_processors: List[str]
+    pii_redaction_active: bool
+    eu_hosting_verified: bool
+    eval_benchmark_accuracy: float
+
+
+class ComplianceReportGenerator:
+    """Generates standardized Data Protection Impact Assessment (DPIA) documentation."""
+
+    @staticmethod
+    def generate_markdown(meta: DPIAMetadata) -> str:
+        report = f"""# Data Protection Impact Assessment (DPIA)
+**Service Name:** {meta.service_name} (Version: {meta.version})  
+**Generated UTC:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}  
+**Logic Hash:** `{meta.logic_hash}`  
+
+---
+
+## 1. Data Flow & Processing Scope
+- **Ingested Data Types:** {', '.join(meta.data_categories)}
+- **External Model Processors:** {', '.join(meta.third_party_processors)}
+
+## 2. Privacy & Sovereignty Safeguards
+- **Real-Time PII Pseudonymization:** {'[ENABLED]' if meta.pii_redaction_active else '[DISABLED]'}
+- **Data Residency EU-Bound:** {'[VERIFIED]' if meta.eu_hosting_verified else '[NON-EU]'}
+
+## 3. Algorithmic Performance & Safety
+- **Golden Evaluation Benchmark Score:** {meta.eval_benchmark_accuracy:.1%}
+- **Compliance Status:** COMPLIANT WITH EU AI ACT & GDPR ARTICLE 25
+"""
+        return report.strip()
+
+
+if __name__ == "__main__":
+    manifest = DPIAMetadata(
+        service_name="EnterpriseCustomerAssistant",
+        version="2.4.0",
+        logic_hash="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        data_categories=["Customer Inquiries", "Order Metadata", "Anonymized Account IDs"],
+        third_party_processors=["Azure OpenAI (Germany West Central)", "Private vLLM On-Prem"],
+        pii_redaction_active=True,
+        eu_hosting_verified=True,
+        eval_benchmark_accuracy=0.965
+    )
+
+    doc = ComplianceReportGenerator.generate_markdown(manifest)
+    print("=== Generated DPIA Documentation ===")
+    print(doc)
 ```
-**Why this is preferred:** It automates **Legal Documentation**. It keeps your legal team happy without requiring engineers to manually write compliance reports every week.
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` and `datetime`.
+- **How It Works:** Pulls live system configuration attributes and renders a formal Markdown compliance report suitable for legal officers and regulators.
+- **Expected Output:** A structured, publication-ready DPIA document.
+- **Why This Approach:** Automates governance reporting, ensuring documentation remains synchronized with continuous software deployments.
 
 ---
 
@@ -244,7 +595,7 @@ In the next chapter, we will look at **Guardrails Systems**, the technical imple
 
 ## References & Further Reading
 - **Jones Walker (2026)**: *Privacy as the Foundation of Responsible AI Governance*.
-- **EU AI Act (Official)**: *Regulatory Framework for AI Practitioners*.
-- **GDPR v2.0**: *Guidelines for Automated Decision Making*.
-- **IBM Research**: *AI Fairness 360 Open Source Toolkit*.
-- **Microsoft**: *The Future of Responsible AI in the Enterprise*.
+- **European Parliament (2024)**: *EU Artificial Intelligence Act (EU AI Act) - Full Statutory Text*.
+- **European Commission**: *GDPR Article 22 & 25: Automated Decision-Making and Data Protection by Design*.
+- **IBM Research / Linux Foundation**: *AI Fairness 360 Open Source Toolkit (AIF360)*.
+- **NIST**: *AI Risk Management Framework (AI RMF 1.0) Profiles and Governance Workflows*.

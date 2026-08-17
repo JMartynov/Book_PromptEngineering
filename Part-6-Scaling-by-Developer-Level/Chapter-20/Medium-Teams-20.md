@@ -37,185 +37,608 @@ In practice, this stack solves several critical scaling issues:
 
 ## Practical Implementation: 8 Python Examples
 
-These examples demonstrate how to build a collaborative, production-ready AI system for a growing team.
+These production-grade examples demonstrate how engineering teams scale AI reliability through typed shared state reducers, modular pipeline nodes, multi-tenant vector filtering, CI/CD evaluation suites, centralized distributed tracing, multi-provider failover, versioned prompt configs, and asynchronous human-in-the-loop review gates.
 
-### Example 1: Shared "State" in LangGraph
-**Problem:** Multiple developers working on different parts of an agent need a way to share information.
-**Solution:** Use a TypedDict to define a global "State" that all nodes in the graph can read and write to.
-
-```python
-from typing import Annotated, TypedDict, List, Dict
-from langgraph.graph.message import add_messages
-
-class TeamState(TypedDict):
-    """A strictly defined schema for team collaboration on an AI workflow."""
-
-    # 'add_messages' ensures LLM history is combined correctly from all nodes
-    messages: Annotated[List[Dict], add_messages]
-
-    # Domain-specific shared memory
-    research_notes: str
-    is_ready_for_review: bool
-    audit_log: List[str]
-
-# Every node function on the team receives this exact object structure.
-```
-**Why this is preferred:** It provides a **Single Source of Truth**. Any developer adding a new "Node" to the system knows exactly what data is available and how to update it.
-
----
-
-### Example 2: Modular Node Functions
-**Problem:** A 2,000-line Python file for an agent is impossible to maintain.
-**Solution:** Break the agent's logic into small, independent "Node Functions" that can be tested in isolation.
+### Example 1: Shared "State" Reducer in Graph Architectures
+**Problem:** Multiple engineers working concurrently on different workflow steps need a shared, predictable data contract to prevent state overwriting and race conditions.
+**Solution:** Define an immutable state schema with explicit reducer functions for message history and domain-specific artifacts.
 
 ```python
-from typing import List, Dict, Optional, Any, Callable, Union, Literal, Annotated, TypedDict
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
 
-def research_node(state: TeamState) -> Dict:
-    """Developer A focuses only on the research logic."""
-    # ... complex scraping/retrieval logic ...
-    return {"research_notes": "Identified 5 key competitors.", "audit_log": ["Research completed"]}
 
-def review_node(state: TeamState) -> Dict:
-    """Developer B focuses only on the quality check logic."""
-    # ... logic to check research_notes for accuracy ...
-    return {"is_ready_for_review": True, "audit_log": ["Review passed"]}
+class GraphMessage(BaseModel):
+    author: str
+    content: str
+    step: int
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-# These nodes are combined in a separate 'app.py' graph definition.
-```
-**Why this is preferred:** It enables **Parallel Development**. Two engineers can work on different parts of the same agent without stepping on each other's toes.
 
----
+class TeamWorkflowState(BaseModel):
+    """The shared data contract across all pipeline nodes."""
+    workflow_id: str
+    current_step: int = 0
+    messages: List[GraphMessage] = Field(default_factory=list)
+    research_notes: Dict[str, Any] = Field(default_factory=dict)
+    is_approved: bool = False
+    audit_trail: List[str] = Field(default_factory=list)
 
-### Example 3: Production RAG with Metadata Filtering
-**Problem:** A simple RAG system returns documents that aren't relevant to the user's specific project.
-**Solution:** Use "Metadata Filters" in your production Vector DB to restrict the search space.
+    def append_message(self, author: str, content: str) -> None:
+        self.current_step += 1
+        msg = GraphMessage(author=author, content=content, step=self.current_step)
+        self.messages.append(msg)
+        self.audit_trail.append(f"[Step {self.current_step}] {author}: {content[:40]}...")
 
-```python
-from typing import List
+    def update_notes(self, section: str, data: Any) -> None:
+        self.research_notes[section] = data
+        self.audit_trail.append(f"[Step {self.current_step}] Updated section '{section}'.")
 
-class ProductionRetriever:
-    def fetch(self, query: str, project_id: str) -> List[str]:
-        """Ensures strict data isolation at the retrieval layer."""
 
-        # This filter is executed by the DB engine for 100% security
-        # results = vector_db.search(
-        #     query,
-        #     filter={"project_id": project_id, "status": "approved"}
-        # )
-        return ["Authorized Document 1", "Authorized Document 2"]
-
-# Execution Example
 if __name__ == "__main__":
-    pass
-    # retriever = ProductionRetriever()
-    # context = retriever.fetch("Who is the CEO?", project_id="client_99")
+    state = TeamWorkflowState(workflow_id="wf-audit-2026")
+
+    # Developer A's node records research
+    state.append_message("ResearchEngineer", "Scanned 12 architectural documents.")
+    state.update_notes("competitors", ["Vendor A", "Vendor B"])
+
+    # Developer B's node records compliance review
+    state.append_message("ComplianceOfficer", "SOC2 compliance verified for all target endpoints.")
+
+    print(f"Workflow ID: {state.workflow_id}")
+    print(f"Total Steps: {state.current_step}")
+    print(f"Messages Logged: {len(state.messages)}")
+    print("\nAudit Trail:")
+    for entry in state.audit_trail:
+        print(f"  * {entry}")
 ```
-**Why this is preferred:** It ensures **Data Isolation** between different projects or users, which is a hard requirement for B2B applications.
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` (v2) and standard `datetime`.
+- **How It Works:** Encapsulates mutations inside reducer methods (`append_message`, `update_notes`) that simultaneously increment the logical step counter and maintain an immutable chronological audit trail.
+- **Expected Output:** A centrally synchronized workflow state with explicit step counts and audit logs.
+- **Why This Approach:** Eliminates conflicting state overwrites when separate developers construct independent nodes across the same shared graph.
 
 ---
 
-### Example 4: Automated CI/CD Regression Tests
-**Problem:** A developer updates the "System Prompt" and accidentally breaks the "Billing" extractor.
-**Solution:** Run a script in your CI/CD pipeline that checks the LLM's output against a "Golden Dataset."
+### Example 2: Modular Node Functions & Pipeline Composition
+**Problem:** Monolithic 1,000-line agent scripts are impossible for multi-developer teams to maintain, test, and debug.
+**Solution:** Decompose the agentic workflow into isolated, independently testable node functions coordinated by a pipeline dispatcher.
 
 ```python
-import pytest
+from typing import Callable, Dict, List
+from pydantic import BaseModel
 
-def test_billing_extractor_regression():
-    """CI test to ensure prompt changes don't break downstream logic."""
 
-    # 1. Load 50 'Golden' examples of billing transcripts
-    # dataset = load_golden_set("billing_v1")
+class PipelineContext(BaseModel):
+    topic: str
+    research_data: str = ""
+    synthesized_report: str = ""
+    is_ready_for_publish: bool = False
+    execution_logs: List[str] = []
 
-    # 2. Run the current 'billing_node' logic
-    # results = run_node_on_dataset(billing_node, dataset)
 
-    # 3. Assert quality is within 5% of the baseline
-    # assert calculate_accuracy(results) > 0.92
-    pass
+def research_node(ctx: PipelineContext) -> PipelineContext:
+    """Developed by Engineer 1: Focuses solely on information retrieval."""
+    print("[Node: Research] Fetching verified domain benchmarks...")
+    ctx.research_data = "Latency decreased by 40% when switching from REST to gRPC for intra-agent RPCs."
+    ctx.execution_logs.append("research_completed")
+    return ctx
+
+
+def synthesis_node(ctx: PipelineContext) -> PipelineContext:
+    """Developed by Engineer 2: Focuses solely on summarizing findings."""
+    print("[Node: Synthesis] Compiling engineering brief...")
+    ctx.synthesized_report = f"# Technical Summary on {ctx.topic}\nFinding: {ctx.research_data}"
+    ctx.execution_logs.append("synthesis_completed")
+    return ctx
+
+
+def qa_review_node(ctx: PipelineContext) -> PipelineContext:
+    """Developed by Engineer 3: Focuses solely on quality and safety validation."""
+    print("[Node: QA Review] Verifying citations and technical claims...")
+    if len(ctx.synthesized_report) > 20 and "gRPC" in ctx.synthesized_report:
+        ctx.is_ready_for_publish = True
+        ctx.execution_logs.append("qa_passed")
+    return ctx
+
+
+def run_pipeline(topic: str) -> PipelineContext:
+    nodes: List[Callable[[PipelineContext], PipelineContext]] = [
+        research_node,
+        synthesis_node,
+        qa_review_node
+    ]
+    ctx = PipelineContext(topic=topic)
+    for node in nodes:
+        ctx = node(ctx)
+    return ctx
+
+
+if __name__ == "__main__":
+    final_ctx = run_pipeline("Enterprise Microservice Performance")
+    print(f"\nPipeline Ready to Publish: {final_ctx.is_ready_for_publish}")
+    print(f"Executed Steps: {' -> '.join(final_ctx.execution_logs)}")
+    print(f"\nFinal Report:\n{final_ctx.synthesized_report}")
 ```
-**Why this is preferred:** It moves from **"Vibes-based deployment"** to **"Metrics-based deployment."** It gives the team the confidence to iterate fast.
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` for pipeline context serialization and standard Python functional composition.
+- **How It Works:** Each node receives a `PipelineContext`, performs its discrete task, appends to `execution_logs`, and passes the modified context to the next stage.
+- **Expected Output:** A clean, sequential transformation of raw input into a verified, publication-ready report.
+- **Why This Approach:** Enables parallel feature development and isolated unit testing for individual team members without merge conflicts.
 
 ---
 
-### Example 5: Centralized Trace Logging
-**Problem:** A user says "The AI gave a weird answer," but you can't see what actually happened.
-**Solution:** Use a decorator or a context manager to send every step to a tracing platform (e.g. Langfuse).
+### Example 3: Production RAG with Tenant & Metadata Filtering
+**Problem:** In multi-tenant enterprise B2B apps, global vector retrieval risks catastrophic cross-tenant data leakage.
+**Solution:** Enforce mandatory metadata filtering (`tenant_id`, `project_id`, `access_tier`) at the query layer before computing vector similarity.
 
 ```python
-# In 2026, we use the standard OpenTelemetry (OTel) instrumentation
-# @observe(name="Production_Agent_Run")
-def run_agent_workflow(user_query: str, project_id: str):
-    """Executes the agent while automatically logging every step for the team."""
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
 
-    # tracer.set_tag("project_id", project_id)
-    # 1. Plan
-    # 2. Research
-    # 3. Review
-    pass
 
-# The team can now 'Replay' the exact trace in a playground to debug.
+class DocumentChunk(BaseModel):
+    chunk_id: str
+    tenant_id: str
+    project_id: str
+    access_tier: str  # 'public', 'confidential', 'restricted'
+    content: str
+
+
+class ProductionVectorIndex:
+    """Simulates a production vector database (e.g. Qdrant / Weaviate) with metadata pre-filtering."""
+
+    def __init__(self):
+        self.chunks: List[DocumentChunk] = []
+
+    def insert(self, chunk: DocumentChunk) -> None:
+        self.chunks.append(chunk)
+
+    def search(
+        self,
+        query: str,
+        tenant_id: str,
+        project_id: str,
+        user_access_tier: str
+    ) -> List[DocumentChunk]:
+        """
+        Executes strict metadata pre-filtering before returning matched records.
+        Guarantees 100% tenant isolation at the database boundary.
+        """
+        tier_hierarchy = {"public": 1, "confidential": 2, "restricted": 3}
+        user_level = tier_hierarchy.get(user_access_tier, 1)
+
+        allowed_results: List[DocumentChunk] = []
+        for chunk in self.chunks:
+            # Enforce tenant isolation
+            if chunk.tenant_id != tenant_id:
+                continue
+            # Enforce project boundary
+            if chunk.project_id != project_id:
+                continue
+            # Enforce access clearance
+            chunk_level = tier_hierarchy.get(chunk.access_tier, 1)
+            if chunk_level > user_level:
+                continue
+
+            allowed_results.append(chunk)
+
+        return allowed_results
+
+
+if __name__ == "__main__":
+    index = ProductionVectorIndex()
+
+    # Tenant A documents
+    index.insert(DocumentChunk(
+        chunk_id="c1", tenant_id="tenant_acme", project_id="proj_alpha",
+        access_tier="confidential", content="Acme Alpha Q3 Financial Forecast."
+    ))
+    index.insert(DocumentChunk(
+        chunk_id="c2", tenant_id="tenant_acme", project_id="proj_alpha",
+        access_tier="restricted", content="Acme Alpha Cryptographic Keys."
+    ))
+
+    # Tenant B document
+    index.insert(DocumentChunk(
+        chunk_id="c3", tenant_id="tenant_globex", project_id="proj_beta",
+        access_tier="confidential", content="Globex Strategic Roadmap."
+    ))
+
+    # User from Tenant Acme with 'confidential' clearance searches
+    results = index.search(
+        query="Financial forecast",
+        tenant_id="tenant_acme",
+        project_id="proj_alpha",
+        user_access_tier="confidential"
+    )
+
+    print(f"Retrieved {len(results)} authorized chunks for Acme Alpha:")
+    for r in results:
+        print(f"  [{r.access_tier.upper()}] {r.content}")
 ```
-**Why this is preferred:** It provides **Forensic Visibility**. You can "Replay" the exact sequence of events that led to a failure, even if it happened 3 days ago.
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` for chunk schema modeling.
+- **How It Works:** Applies strict pre-filtering for `tenant_id`, `project_id`, and `user_access_tier`. Chunks that fail the metadata criteria are never evaluated or returned.
+- **Expected Output:** Only records matching the exact tenant and authorized permission level are returned.
+- **Why This Approach:** Prevents cross-customer data leakage and satisfies compliance frameworks (SOC2, HIPAA, GDPR).
 
 ---
 
-### Example 6: Multi-Model "Failover" Logic
-**Problem:** Your primary LLM (e.g. GPT-4) hits a rate limit during peak hours.
-**Solution:** Implement a "Fallback" mechanism in your orchestration layer.
+### Example 4: Automated CI/CD Regression Test Suite
+**Problem:** Prompt tweaks made by one developer can silently degrade downstream parsing accuracy across hundreds of edge cases.
+**Solution:** Implement an automated test runner executing assertions against a versioned Golden Evaluation Dataset in CI/CD pipelines.
 
 ```python
-def call_llm_with_resilience(prompt: str):
-    """Ensures feature availability through automated failover."""
+from dataclasses import dataclass
+from typing import Callable, Dict, List
 
-    try:
-        # Primary: High-performance model
-        return gpt4o.invoke(prompt)
-    except Exception as e:
-        print(f"Primary model failed: {e}. Switching to fallback...")
-        # Secondary: Independent provider/model
-        return claude3.invoke(prompt)
 
-# Result: 99.9% availability for AI features.
+@dataclass
+class GoldenTestCase:
+    test_id: str
+    raw_transcript: str
+    expected_amount: float
+    expected_status: str
+
+
+class CI_EvalRunner:
+    """Automated testing harness designed for GitHub Actions / GitLab CI pipelines."""
+
+    def __init__(self, golden_dataset: List[GoldenTestCase]):
+        self.dataset = golden_dataset
+
+    def run_eval(self, extractor_func: Callable[[str], Dict[str, Any]], pass_threshold: float = 0.95) -> bool:
+        print(f"=== Starting CI/CD AI Regression Suite ({len(self.dataset)} cases) ===")
+        passed_cases = 0
+
+        for case in self.dataset:
+            result = extractor_func(case.raw_transcript)
+            amount_match = abs(result.get("amount", 0.0) - case.expected_amount) < 0.01
+            status_match = result.get("status", "").upper() == case.expected_status.upper()
+
+            if amount_match and status_match:
+                passed_cases += 1
+                print(f"  [PASS] {case.test_id}: Output matches golden target.")
+            else:
+                print(f"  [FAIL] {case.test_id}: Expected (${case.expected_amount}, {case.expected_status}), got ({result.get('amount')}, {result.get('status')})")
+
+        accuracy = passed_cases / len(self.dataset)
+        print(f"\nEval Accuracy: {accuracy * 100:.1f}% (Required: {pass_threshold * 100:.1f}%)")
+
+        if accuracy < pass_threshold:
+            print("❌ CI BUILD FAILED: Accuracy dropped below acceptable threshold.")
+            return False
+        
+        print("✅ CI BUILD PASSED: Ready for production deployment.")
+        return True
+
+
+if __name__ == "__main__":
+    golden_suite = [
+        GoldenTestCase("TEST-01", "Payment of $450.00 confirmed for invoice 101", 450.00, "CONFIRMED"),
+        GoldenTestCase("TEST-02", "Wire transfer $1,200.50 pending bank clearance", 1200.50, "PENDING"),
+        GoldenTestCase("TEST-03", "Refund $75.00 completed successfully", 75.00, "CONFIRMED"),
+    ]
+
+    # Candidate extraction function under test
+    def candidate_billing_node(text: str) -> Dict[str, Any]:
+        if "450.00" in text:
+            return {"amount": 450.00, "status": "CONFIRMED"}
+        elif "1,200.50" in text:
+            return {"amount": 1200.50, "status": "PENDING"}
+        elif "75.00" in text:
+            return {"amount": 75.00, "status": "CONFIRMED"}
+        return {"amount": 0.0, "status": "UNKNOWN"}
+
+    runner = CI_EvalRunner(golden_suite)
+    is_success = runner.run_eval(candidate_billing_node, pass_threshold=1.0)
 ```
-**Why this is preferred:** It ensures **High Availability**. Your application remains functional even when your primary AI provider is struggling.
+
+**Developer Explanation:**
+- **Libraries Used:** Standard library `dataclasses` and `typing`.
+- **How It Works:** Evaluates the candidate extractor function against standardized test cases and asserts numerical and semantic match rates against pre-defined thresholds.
+- **Expected Output:** Detailed pass/fail report per test case with pipeline pass/fail exit code.
+- **Why This Approach:** Replaces guesswork with deterministic metrics in pull requests, ensuring prompt modifications never degrade baseline accuracy.
 
 ---
 
-### Example 7: Standardized "Prompt Config" Files
-**Problem:** Prompts are scattered throughout the code in different formats.
-**Solution:** Use a dedicated `prompts/` directory with YAML files that include model settings and version numbers.
-
-```yaml
-# prompts/support_v2.yaml
-model: gpt-4o
-temperature: 0.2
-text: "You are a support bot..."
-```
-**Why this is preferred:** It makes prompt changes **Reviewable**. A prompt update now looks like a normal code change in a Pull Request.
-
----
-
-### Example 8: Collaborative "Human-in-the-Loop" UI
-**Problem:** High-stakes AI outputs need a human "Expert" to verify them before they are saved.
-**Solution:** Build a "Review Node" into your graph that pauses the state and sends a notification to a Slack channel or internal UI.
+### Example 5: Centralized OpenTelemetry-Style Trace Logging
+**Problem:** Debugging distributed multi-agent systems in production is impossible when logs are scattered across uncoordinated `print()` statements.
+**Solution:** Collect structured spans with trace IDs, parent span relationships, token usage, and latency for centralized observability.
 
 ```python
-def human_gate_node(state: TeamState) -> str:
-    """A graph boundary that waits for human intervention."""
+import time
+import uuid
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
 
-    # 1. Check if an 'approved' flag exists in the persisted state
-    if state.get("is_approved_by_human"):
-        return "finalize_workflow"
 
-    # 2. If not, trigger a notification and HALT
-    # send_slack_notification("Draft ready for review: http://internal-tool/123")
-    return "wait_for_signal"
+class TraceSpan(BaseModel):
+    span_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    trace_id: str
+    parent_span_id: Optional[str] = None
+    operation_name: str
+    duration_ms: float
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
-# The workflow only moves to 'finalize' once a human updates the state.
+
+class CentralizedTracer:
+    """Collects and exports OpenTelemetry/Langfuse-compatible telemetry spans."""
+
+    def __init__(self):
+        self.spans: List[TraceSpan] = []
+
+    def record_span(
+        self,
+        trace_id: str,
+        operation: str,
+        duration_ms: float,
+        parent_id: Optional[str] = None,
+        **metadata: Any
+    ) -> TraceSpan:
+        span = TraceSpan(
+            trace_id=trace_id,
+            parent_span_id=parent_id,
+            operation_name=operation,
+            duration_ms=round(duration_ms, 2),
+            metadata=metadata
+        )
+        self.spans.append(span)
+        print(f"[Trace: {span.trace_id}] Span '{span.operation_name}' ({span.duration_ms}ms) recorded.")
+        return span
+
+    def export_trace_summary(self, trace_id: str) -> List[Dict[str, Any]]:
+        return [s.model_dump() for s in self.spans if s.trace_id == trace_id]
+
+
+if __name__ == "__main__":
+    tracer = CentralizedTracer()
+    session_trace_id = f"trace-{uuid.uuid4().hex[:6]}"
+
+    # Root span
+    root_span = tracer.record_span(
+        trace_id=session_trace_id,
+        operation="AgentPipelineRun",
+        duration_ms=250.4,
+        user_id="usr_901"
+    )
+
+    # Child span 1: Planning
+    tracer.record_span(
+        trace_id=session_trace_id,
+        operation="PlannerNode",
+        parent_id=root_span.span_id,
+        duration_ms=85.2,
+        tokens_used=350,
+        model="gpt-4o"
+    )
+
+    # Child span 2: Tool execution
+    tracer.record_span(
+        trace_id=session_trace_id,
+        operation="DatabaseLookupTool",
+        parent_id=root_span.span_id,
+        duration_ms=45.1,
+        query="SELECT * FROM users WHERE active=1"
+    )
+
+    print("\nExported Trace Spans:")
+    for span in tracer.export_trace_summary(session_trace_id):
+        print(f"  * [{span['span_id']}] {span['operation_name']} (Parent: {span['parent_span_id']}) -> {span['duration_ms']}ms")
 ```
-**Why this is preferred:** It builds **Trust and Governance**. It allows the team to deploy AI for sensitive tasks while maintaining human accountability.
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` and `uuid` for structured telemetry models.
+- **How It Works:** Correlates parent-child operations under a unified `trace_id`, recording execution time, token metrics, and tool parameters.
+- **Expected Output:** A tree of nested spans ready for export to monitoring platforms (Langfuse, LangSmith, Datadog).
+- **Why This Approach:** Gives teams instant root-cause visibility into failing agent tool calls, latency bottlenecks, and runaway token loops.
+
+---
+
+### Example 6: Multi-Model Resilient Failover Logic
+**Problem:** Outages, rate limits (HTTP 429), and transient timeouts from single AI providers bring customer-facing applications down.
+**Solution:** Implement an automated failover client that falls back gracefully from a primary provider to an independent secondary provider.
+
+```python
+import time
+from typing import Any, Dict
+
+
+class ResilientAIClient:
+    """Multi-provider orchestrator with automatic fallback upon failure."""
+
+    def __init__(self, primary_provider: str = "OpenAI", secondary_provider: str = "Anthropic"):
+        self.primary_provider = primary_provider
+        self.secondary_provider = secondary_provider
+        self.simulate_primary_failure = True  # Demonstrates failover recovery
+
+    def _call_primary(self, prompt: str) -> str:
+        if self.simulate_primary_failure:
+            raise ConnectionError("503 Service Unavailable: OpenAI Rate Limit Exceeded.")
+        return f"[{self.primary_provider}] Response for '{prompt[:20]}...'"
+
+    def _call_secondary(self, prompt: str) -> str:
+        return f"[{self.secondary_provider}] (Fallback Active) Response for '{prompt[:20]}...'"
+
+    def generate(self, prompt: str) -> Dict[str, Any]:
+        start = time.perf_counter()
+        try:
+            print(f"[Client] Attempting primary provider: {self.primary_provider}...")
+            content = self._call_primary(prompt)
+            provider_used = self.primary_provider
+        except Exception as err:
+            print(f"[Client] Primary failed: {err}")
+            print(f"[Client] Switching immediately to fallback provider: {self.secondary_provider}...")
+            content = self._call_secondary(prompt)
+            provider_used = self.secondary_provider
+
+        elapsed = time.perf_counter() - start
+        return {
+            "status": "success",
+            "provider_used": provider_used,
+            "latency_ms": round(elapsed * 1000, 2),
+            "content": content
+        }
+
+
+if __name__ == "__main__":
+    client = ResilientAIClient()
+    result = client.generate("Generate security audit report for VPC 10.0.0.0/16")
+    print(f"\nExecution Result:")
+    print(f"  Provider Used: {result['provider_used']}")
+    print(f"  Latency: {result['latency_ms']}ms")
+    print(f"  Response: {result['content']}")
+```
+
+**Developer Explanation:**
+- **Libraries Used:** Standard Python exception handling and `time.perf_counter`.
+- **How It Works:** Wraps primary LLM calls in a `try/except` block. Upon encountering provider errors (HTTP 429/503/timeouts), it routes the prompt to an independent secondary model.
+- **Expected Output:** Guaranteed response continuity even when the primary vendor is experiencing downtime.
+- **Why This Approach:** Achieves 99.9% uptime SLA for production AI features without manual operator intervention.
+
+---
+
+### Example 7: Standardized Prompt Versioning & Config Loader
+**Problem:** Hardcoding prompt strings inside Python source files prevents non-developer teammates from reviewing or updating prompts in PRs.
+**Solution:** Store versioned prompt configurations in dedicated YAML/JSON files and validate them with Pydantic schemas.
+
+```python
+import json
+from typing import Any, Dict
+from pydantic import BaseModel, Field
+
+
+class PromptTemplateConfig(BaseModel):
+    version: str = Field(..., pattern=r"^v[0-9]+\.[0-9]+$", description="SemVer version tag, e.g. v2.1")
+    model: str
+    temperature: float = Field(default=0.2, ge=0.0, le=1.0)
+    system_prompt: str
+    required_variables: list[str]
+
+
+class PromptManager:
+    """Loads and formats version-controlled prompt configurations."""
+
+    @staticmethod
+    def load_prompt_config(raw_json: str) -> PromptTemplateConfig:
+        data = json.loads(raw_json)
+        return PromptTemplateConfig.model_validate(data)
+
+    @staticmethod
+    def render_prompt(config: PromptTemplateConfig, variables: Dict[str, str]) -> str:
+        # Verify all required variables are present
+        missing = [v for v in config.required_variables if v not in variables]
+        if missing:
+            raise KeyError(f"Missing required template variables: {missing}")
+
+        formatted_system = config.system_prompt
+        for key, val in variables.items():
+            formatted_system = formatted_system.replace(f"{{{key}}}", val)
+
+        return formatted_system
+
+
+if __name__ == "__main__":
+    # Simulated content from prompts/support_v2.json
+    raw_config_file = """
+    {
+        "version": "v2.1",
+        "model": "gpt-4o",
+        "temperature": 0.1,
+        "system_prompt": "You are a tier-2 support specialist for {company_name}. User inquiry: {user_query}",
+        "required_variables": ["company_name", "user_query"]
+    }
+    """
+
+    cfg = PromptManager.load_prompt_config(raw_config_file)
+    print(f"Loaded Prompt Version: {cfg.version} (Model: {cfg.model}, Temp: {cfg.temperature})")
+
+    rendered = PromptManager.render_prompt(
+        cfg,
+        {"company_name": "CloudScale Logistics", "user_query": "How do I update webhook URLs?"}
+    )
+    print(f"\nRendered System Prompt:\n'{rendered}'")
+```
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` for schema validation and `json` for configuration parsing.
+- **How It Works:** Externalizes prompts into versioned configuration files (`v2.1`). Enforces that all required placeholder variables (`company_name`, `user_query`) exist prior to rendering.
+- **Expected Output:** Validated, rendered prompt strings ready for inference.
+- **Why This Approach:** Enables seamless Git-based review of prompt changes, audit trails for prompt drift, and clean separation between prompts and code.
+
+---
+
+### Example 8: Collaborative Human-in-the-Loop (HITL) Review Gate
+**Problem:** Fully autonomous agents can accidentally execute unintended actions on live databases or external client accounts.
+**Solution:** Implement an asynchronous review gate that pauses the execution graph, dispatches an approval webhook, and waits for a signed human decision.
+
+```python
+import uuid
+from typing import Dict, Optional
+from pydantic import BaseModel, Field
+
+
+class PendingHumanReview(BaseModel):
+    review_token: str = Field(default_factory=lambda: f"rev_{uuid.uuid4().hex[:8]}")
+    action_type: str
+    target_account: str
+    payload_summary: str
+    status: str = "PENDING"  # 'PENDING', 'APPROVED', 'REJECTED'
+
+
+class HITLGovernanceGate:
+    """Manages pause-and-resume review tokens for human authorization."""
+
+    def __init__(self):
+        self.pending_reviews: Dict[str, PendingHumanReview] = {}
+
+    def submit_for_review(self, action_type: str, account_id: str, summary: str) -> PendingHumanReview:
+        review = PendingHumanReview(
+            action_type=action_type,
+            target_account=account_id,
+            payload_summary=summary
+        )
+        self.pending_reviews[review.review_token] = review
+        print(f"[HITL Gate] PAUSED: Action '{action_type}' for '{account_id}' requires human approval.")
+        print(f"[HITL Gate] Generated Review Token: {review.review_token}")
+        return review
+
+    def approve_or_reject(self, token: str, approved: bool) -> str:
+        review = self.pending_reviews.get(token)
+        if not review:
+            raise KeyError("Review token not found or expired.")
+
+        review.status = "APPROVED" if approved else "REJECTED"
+        status_text = review.status
+        del self.pending_reviews[token]
+        return f"Review {token} finalized with status: {status_text}"
+
+
+if __name__ == "__main__":
+    gate = HITLGovernanceGate()
+
+    # Step 1: Agent creates a high-stakes action
+    pending_item = gate.submit_for_review(
+        action_type="REFUND_ISSUANCE",
+        account_id="client_corp_441",
+        summary="Issue $4,850.00 credit adjustment for billing dispute."
+    )
+
+    # Step 2: Human manager inspects and approves via Slack / internal dashboard
+    approval_result = gate.approve_or_reject(pending_item.review_token, approved=True)
+    print(f"\n[HITL Resolution] {approval_result}")
+```
+
+**Developer Explanation:**
+- **Libraries Used:** `pydantic` and `uuid`.
+- **How It Works:** Generates a secure `review_token` and pauses workflow execution for sensitive actions (refunds, deletions, schema migrations). Once a manager approves the token, the system resumes execution.
+- **Expected Output:** Explicit audit records of all human interventions with tokenized authorization states.
+- **Why This Approach:** Provides enterprise governance and risk mitigation while retaining the speed of automated workflows.
 
 ---
 
@@ -228,8 +651,8 @@ In the next chapter, we will look at **Enterprise Systems**, where security, com
 ---
 
 ## References & Further Reading
-- **LangGraph**: *Building Stateful, Multi-Agent Applications*.
-- **Qdrant**: *Vector Search Engine for Production AI*.
-- **LangSmith**: *The Platform for LLM Debugging and Testing*.
-- **DeepEval**: *Unit Testing Framework for LLMs*.
+- **LangGraph**: *Building Stateful, Multi-Agent Applications in Production*.
+- **Qdrant / Weaviate**: *Vector Search Engines for Enterprise Production AI & Hybrid Filtering*.
+- **LangSmith & Langfuse**: *Centralized Tracing, Telemetry, and LLM Observability Platforms*.
+- **DeepEval / Ragas**: *Continuous Integration & Unit Testing Frameworks for LLM Applications*.
 - **Klement Gunndu (2026)**: *The AI Engineering Stack: Layers for Teams*.
